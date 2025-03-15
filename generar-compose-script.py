@@ -8,7 +8,8 @@ def getComposeContentClient(client_id):
     'entrypoint': '/client',
     'environment': [f'CLI_ID={client_id}', 'CLI_LOG_LEVEL=DEBUG'],
     'networks': ['testing_net'],
-    'depends_on': ['server']
+    'depends_on': ['server'],
+    'volumes': ['./client/config.yaml:/config.yaml']
   }
 
 def getComposeContent(clients_amount):
@@ -20,7 +21,8 @@ def getComposeContent(clients_amount):
         'image': 'server:latest',
         'entrypoint': 'python3 /main.py',
         'environment': ['PYTHONUNBUFFERED=1', 'LOGGING_LEVEL=DEBUG'],
-        'networks': ['testing_net']
+        'networks': ['testing_net'],
+        'volumes': ['./server/config.ini:/config.ini']
       }
     },
     'networks': {
