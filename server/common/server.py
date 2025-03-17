@@ -2,6 +2,10 @@ import signal
 import socket
 import logging
 
+from common.exceptions import ClientClosedConnection
+from common.message import CONFIRMATION, ERROR, Message
+from common.utils import Bet, store_bets
+
 class Server:
     def __init__(self, port, listen_backlog):
         # Initialize server socket
@@ -58,14 +62,23 @@ class Server:
         client socket will also be closed
         """
         try:
-            # TODO: Modify the receive to avoid short-reads
-            msg = self._client_socket.recv(1024).rstrip().decode('utf-8')
-            addr = self._client_socket.getpeername()
-            logging.info(f'action: receive_message | result: success | ip: {addr[0]} | msg: {msg}')
-            # TODO: Modify the send to avoid short-writes
-            self._client_socket.send("{}\n".format(msg).encode('utf-8'))
+            message = self.__receive_message()
+            logging.info(f'action: receive_message | result: success | message: {message}')
+            bet = self.__parse_message(message)
+            store_bets([bet])
+            logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.get_document()} | numero: {bet.get_number()}')
+            response_message = Message(CONFIRMATION, "Bet received").serialize()
+            self.__send_message(response_message)
+
+        except ClientClosedConnection as e:
+            logging.error(f"action: client_closed_connection | result: fail | error: {e}")
         except OSError as e:
-            logging.error(f"action: receive_message | result: fail | error: {e}")
+            logging.error("action: apuesta_almacenada | result: fail | error: {e}")
+            response_message = Message(ERROR, str(e)).serialize()
+            self.__send_message(response_message)
+        except ValueError as e:
+            logging.error(f"action: parse_message | result: fail | error: {e}")
+            response_message = Message(ERROR, str(e)).serialize()
         finally:
             self._client_socket.close()
 
@@ -82,3 +95,42 @@ class Server:
         c, addr = self._server_socket.accept()
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         self._client_socket = c
+
+    def __parse_message(self, message):
+        """
+        Parse the message and return a Bet instance
+        """
+        try:
+            agency_id, bet_info = message.split(" ", 1)
+            first_name, last_name, document, birthdate, number = bet_info.split(",")
+            return Bet(agency_id, first_name, last_name, document, birthdate, number)
+        except ValueError as e:
+            raise ValueError(f"Invalid message format: {message}") from e
+
+    def __receive_message(self):
+        """
+        Receive a message from the client
+        """
+        message = ''
+        while message == '' or message[-1] != '\n':
+            received_message = self._client_socket.recv(1024).decode('utf-8')
+            if received_message == '':
+                raise ClientClosedConnection('Connection closed by client')
+            message += received_message
+        return message.rstrip()
+
+    def __send_message(self, message):
+        """
+        Send a message to the client
+        """
+        total_sent = 0
+        message_bytes = message.encode('utf-8')
+        while total_sent < len(message_bytes):
+            try:
+                sent = self._client_socket.send(message_bytes[total_sent:])
+                if sent == 0:
+                    raise OSError("Socket connection broken")
+                total_sent += sent
+            except OSError as e:
+                logging.error(f"action: send_message | result: fail | error: {e}")
+                break
