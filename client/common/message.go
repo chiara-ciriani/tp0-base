@@ -2,54 +2,127 @@ package common
 
 import (
     "fmt"
-    "strings"
-
-    "github.com/op/go-logging"
+    "bytes"
+    "encoding/binary"
+    "strconv"
 )
+
+type MessageType int
 
 const (
-    CONFIRMATION = "CONFIRMATION"
-    ERROR        = "ERROR"
+    BATCH MessageType = iota
+    BATCH_END
 )
 
-const MESSAGE_DELIMITER=":"
+// SerializeMessageLengthToBytes serializes the length of the message into a byte slice
+func SerializeMessageLengthToBytes(length int) ([]byte, error) {
+    buffer := new(bytes.Buffer)
 
-var messageLog = logging.MustGetLogger("messageLog")
-
-// Message represents a message with a type and content
-type Message struct {
-    Type    string
-    Content string
-}
-
-// Serialize converts a Message struct into a string
-func (m *Message) Serialize() string {
-    return fmt.Sprintf("%s%s%s", m.Type, MESSAGE_DELIMITER, m.Content)
-}
-
-// Deserialize converts a string into a Message struct
-func Deserialize(message string) (*Message, error) {
-    parts := strings.SplitN(message, MESSAGE_DELIMITER, 2)
-    if len(parts) != 2 {
-        return nil, fmt.Errorf("invalid message format: %s", message)
+    if err := binary.Write(buffer, binary.BigEndian, uint16(length)); err != nil {
+        return nil, fmt.Errorf("Failed to write message length: %w", err)
     }
-    return &Message{
-        Type:    parts[0],
-        Content: parts[1],
-    }, nil
+
+    return buffer.Bytes(), nil
 }
 
-// LogMessage logs the message based on its type
-func (message *Message) LogMessage(dni string, numero string, id string) {
-    switch message.Type {
-    case CONFIRMATION:
-        messageLog.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", dni, numero)
-    case ERROR:
-        messageLog.Errorf("action: apuesta_enviada | result: fail | dni: %v | numero: %v | error: %v", 
-            dni, 
-            numero, 
-            message.Content)
-    default:
-        messageLog.Errorf("action: unknown_message_type | result: fail | id: %v | msg: %v", id, message.Serialize())
+// SerializeAgencyIdToBytes serializes the agency ID into a byte slice
+func SerializeAgencyIdToBytes(agencyId string) ([]byte, error) {
+    id, err := strconv.Atoi(agencyId)
+    if err != nil {
+        return nil, fmt.Errorf("Invalid agency ID: %v", err)
     }
+
+    buffer := new(bytes.Buffer)
+
+    if err := binary.Write(buffer, binary.BigEndian, uint8(id)); err != nil {
+        return nil, fmt.Errorf("Failed to write agency ID: %w", err)
+    }
+
+    return buffer.Bytes(), nil
+}
+
+// SerializeMessageTypeToBytes serializes the message type into a byte slice
+func SerializeMessageTypeToBytes(messageType MessageType) ([]byte, error) {
+    buffer := new(bytes.Buffer)
+
+    if err := binary.Write(buffer, binary.BigEndian, uint8(messageType)); err != nil {
+        return nil, fmt.Errorf("Failed to write message type: %w", err)
+    }
+
+    return buffer.Bytes(), nil
+}
+
+// BuildHeader builds the header with message length, message type, and agency ID
+func BuildHeader(messageType MessageType, agencyId string, messageLength int) ([]byte, error) {
+    buffer := new(bytes.Buffer)
+
+    // Serialize message length
+    messageLengthBytes, err := SerializeMessageLengthToBytes(messageLength)
+    if err != nil {
+        return nil, err
+    }
+    buffer.Write(messageLengthBytes)
+
+    // Serialize agency ID
+    agencyIdBytes, err := SerializeAgencyIdToBytes(agencyId)
+    if err != nil {
+        return nil, err
+    }
+    buffer.Write(agencyIdBytes)
+
+    // Serialize message type
+    messageTypeBytes, err := SerializeMessageTypeToBytes(messageType)
+    if err != nil {
+        return nil, err
+    }
+    buffer.Write(messageTypeBytes)
+
+    return buffer.Bytes(), nil
+}
+
+// BuildBatchMessage builds the batch message from a list of bets
+func BuildBatchMessage(agencyId string, batch []Bet) ([]byte, error) {
+    buffer := new(bytes.Buffer)
+
+    // Serialize each bet
+    for _, bet := range batch {
+        betBytes, err := bet.SerializeToBytes()
+        if err != nil {
+            return nil, err
+        }
+        buffer.Write(betBytes)
+    }
+
+    // Calculate message length
+    messageLength := buffer.Len()
+
+    // Serialize header
+    headerBytes, err := BuildHeader(BATCH, agencyId, messageLength)
+    if err != nil {
+        return nil, err
+    }
+
+    // Prepend header to the buffer
+    finalBuffer := new(bytes.Buffer)
+    finalBuffer.Write(headerBytes)
+    finalBuffer.Write(buffer.Bytes())
+
+    return finalBuffer.Bytes(), nil
+}
+
+// BuildBatchEndMessage builds the batch end message
+func BuildBatchEndMessage(agencyId string) ([]byte, error) {
+    buffer := new(bytes.Buffer)
+
+    // Calculate message length (header only)
+    messageLength := 4 // 2 bytes for length, 1 byte for agency ID, 1 byte for message type
+
+    // Serialize header
+    headerBytes, err := BuildHeader(BATCH_END, agencyId, messageLength)
+    if err != nil {
+        return nil, err
+    }
+    buffer.Write(headerBytes)
+
+    return buffer.Bytes(), nil
 }
