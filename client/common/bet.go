@@ -45,7 +45,6 @@ func TransformStringToBet(stringBet string) (Bet, error) {
     }, nil
 }
 
-// REMINDER PARA MI: FALTA ENCODEAR LA AGENCY ID DE LA MISMA FORMA
 // SerializeToBytes serializes the Bet struct into a byte slice
 func (bet *Bet) SerializeToBytes() ([]byte, error) {
     buffer := new(bytes.Buffer)

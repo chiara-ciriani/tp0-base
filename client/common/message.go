@@ -12,6 +12,7 @@ type MessageType int
 const (
     BATCH MessageType = iota
     BATCH_END
+    WINNERS_REQUEST
 )
 
 // SerializeMessageLengthToBytes serializes the length of the message into a byte slice
@@ -94,7 +95,8 @@ func BuildBatchMessage(agencyId string, batch []Bet) ([]byte, error) {
     }
 
     // Calculate message length
-    messageLength := buffer.Len()
+    // 2 due to 1 byte for agency ID and 1 byte for message type
+    messageLength := 2 + buffer.Len()
 
     // Serialize header
     headerBytes, err := BuildHeader(BATCH, agencyId, messageLength)
@@ -115,10 +117,27 @@ func BuildBatchEndMessage(agencyId string) ([]byte, error) {
     buffer := new(bytes.Buffer)
 
     // Calculate message length (header only)
-    messageLength := 4 // 2 bytes for length, 1 byte for agency ID, 1 byte for message type
+    messageLength := 2 // 1 byte for agency ID, 1 byte for message type
 
     // Serialize header
     headerBytes, err := BuildHeader(BATCH_END, agencyId, messageLength)
+    if err != nil {
+        return nil, err
+    }
+    buffer.Write(headerBytes)
+
+    return buffer.Bytes(), nil
+}
+
+// BuildWinnersRequestMessage builds the request winners message
+func BuildWinnersRequestMessage(agencyId string) ([]byte, error) {
+    buffer := new(bytes.Buffer)
+
+    // Calculate message length (header only)
+    messageLength := 2 // 1 byte for agency ID, 1 byte for message type
+
+    // Serialize header
+    headerBytes, err := BuildHeader(WINNERS_REQUEST, agencyId, messageLength)
     if err != nil {
         return nil, err
     }

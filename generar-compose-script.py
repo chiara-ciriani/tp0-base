@@ -23,7 +23,10 @@ def getComposeContent(clients_amount):
         'container_name': 'server',
         'image': 'server:latest',
         'entrypoint': 'python3 /main.py',
-        'environment': ['PYTHONUNBUFFERED=1'],
+        'environment': [
+          'PYTHONUNBUFFERED=1',
+          f'TOTAL_CLIENTS={clients_amount}',
+        ],
         'networks': ['testing_net'],
         'volumes': ['./server/config.ini:/config.ini']
       }

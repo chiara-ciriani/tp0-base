@@ -91,4 +91,15 @@ def load_bets() -> list[Bet]:
         reader = csv.reader(file, quoting=csv.QUOTE_MINIMAL)
         for row in reader:
             yield Bet(row[0], row[1], row[2], row[3], row[4], row[5])
-
+            
+"""
+Get the winners for each agency.
+"""
+def get_winners(total_agencies: int) -> dict[int, list[str]]:
+    winners = {agency_id: [] for agency_id in range(1, total_agencies + 1)}
+    winning_bets = [bet for bet in load_bets() if has_won(bet)]
+    
+    for bet in winning_bets:
+        winners[bet.agency].append(bet.get_document())
+    
+    return winners

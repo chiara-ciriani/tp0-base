@@ -1,7 +1,6 @@
 package common
 
 import (
-    "bufio"
     "encoding/csv"
     "fmt"
     "net"
@@ -10,11 +9,16 @@ import (
     "os"
     "os/signal"
     "syscall"
-    "strconv"
+    "encoding/binary"
     "strings"
 
     "github.com/op/go-logging"
 )
+
+const WINNERS_LEN=2
+const DOCUMENT_LEN=4
+const MSG_SIZE_LEN=2
+const MSG_TYPE_LEN=1
 
 var log = logging.MustGetLogger("log")
 
@@ -120,12 +124,12 @@ func (c *Client) StartClientLoop() {
                 log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
                 return
             }
-            log.Infof("action: send_batch_message | result: success| client_id: %v | batch_length: %v", c.config.ID, len(batch))
+            log.Infof("action: send_batch_message | result: success | client_id: %v | batch_length: %v", c.config.ID, len(batch))
 
-            response, err := c.ReceiveMessage()
+            response, _, err := c.ReceiveMessage()
 
             if err != nil {
-                log.Errorf("action: receive_message| result: fail | client_id: %v | error: %v", c.config.ID, err)
+                log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
                 return
             }
 
@@ -150,7 +154,73 @@ func (c *Client) StartClientLoop() {
         return
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
-    log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+
+    log.Infof("action: get_lottery_winners | result: in_progress | client_id: %v", c.config.ID)
+    if err := c.GetLotteryWinners(); err != nil {
+        log.Infof("action: get_lottery_winners | result: fail | client_id: %v", c.config.ID)
+        return
+    }
+    log.Infof("action: get_lottery_winners | result: success | client_id: %v", c.config.ID)
+}
+
+// TO DO: DOCUMENTACION
+func (c *Client) GetLotteryWinners() error {
+    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
+        if err := c.createClientSocket(); err != nil {
+            return err
+        }
+        // Send winners request message
+        winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
+        if err != nil {
+            log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+        if err := c.SendMessage(winnersRequestMessage); err != nil {
+            log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+        log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
+
+        winners := c.ReceiveWinnersRequestResponse()
+        if winners != nil {
+            log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
+            break
+        }
+        
+        c.conn.Close()
+        
+        time.Sleep(c.config.LoopPeriod)
+    }
+    return nil
+}
+
+// ReceiveWinnersRequestResponse reads the response from the server to the winners request message
+// TO DO: TRADUCIR
+// Hay dos tipos de tipos de mensajes que el servidor puede enviar: SEND_WINNERS, BET_NOT_FINISHED
+// Si el servidor envía SEND_WINNERS, el cliente debe recibir los ganadores y mostrarlos en la consola
+// Si el servidor envía BET_NOT_FINISHED, el cliente debe esperar un tiempo y volver a enviar el mensaje de solicitud de ganadores
+// Devuelve los ganadores
+func (c *Client) ReceiveWinnersRequestResponse() ([]uint32) {
+    responseStatus, winnersBytes, err := c.ReceiveMessage()
+    if err != nil {
+        return nil
+    }
+
+    if responseStatus == BET_NOT_FINISHED {
+        return nil
+    }
+
+    if responseStatus == SEND_WINNERS {
+        winnersLen := len(winnersBytes)
+        winners := []uint32{}
+        for i := 0; i < winnersLen; i += DOCUMENT_LEN {
+            winner := binary.BigEndian.Uint32(winnersBytes[i : i+DOCUMENT_LEN])
+            winners = append(winners, winner)
+        }
+
+        return winners
+    }
+    return nil
 }
 
 // SendEndMessage Sends the end message to the server
@@ -169,6 +239,9 @@ func (c *Client) SendEndMessage() error {
         return err
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
+
+    // TO DO: SI EL SERVIDOR ME MANDA UN OK, TENGO QUE AGREGARLO ACA
+
     c.conn.Close()
     return nil
 }
@@ -198,20 +271,50 @@ func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
     return bets, nil
 }
 
-// ReceiveMessage reads a message from the server
-func (c *Client) ReceiveMessage() (ResponseStatus, error) {
-    reader := bufio.NewReader(c.conn)
-    message, err := reader.ReadString('\n')
+// TO DO: DOCU
+func (c *Client) ReceiveMessage() (ResponseStatus, []byte, error) {
+    message_len_bytes, err := c.ReceiveExactMessage(MSG_SIZE_LEN)
     if err != nil {
-        log.Errorf("action: receive_message | result: fail | error: %v", err)	
-        return ResponseStatus(1), err
+        log.Errorf("action: receive_message | result: fail | error: %v", err)
+        return ResponseStatus(1), nil, err
     }
-    response, err := strconv.Atoi(strings.TrimSpace(message))
+
+    message_len := int(binary.BigEndian.Uint16(message_len_bytes))
+
+    received_message, err := c.ReceiveExactMessage(message_len)
     if err != nil {
-        log.Errorf("action: string_conversion | result: fail | error: %v", err)	
-        return ResponseStatus(1), err
+        log.Errorf("action: receive_message | result: fail | error: %v", err)
+        return ResponseStatus(1), nil, err
     }
-    return ResponseStatus(response), nil
+
+    message_type := int(received_message[0])
+    response_status := ResponseStatus(message_type)
+    
+    return response_status, received_message[MSG_TYPE_LEN:], nil
+}
+
+// TO DO: DOCU
+func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
+    data := make([]byte, lengthToRead)
+    bytesRead, err := c.conn.Read(data)
+    if err != nil {
+        log.Errorf("action: receive_exact_message | result: fail | error: %v", err)
+        return nil, err
+    }
+    totalBytesRead := bytesRead
+    for totalBytesRead < lengthToRead {
+        bytesRead, err = c.conn.Read(data[totalBytesRead:])
+        if err != nil {
+            log.Errorf("action: receive_exact_message | result: fail | error: %v", err)
+            return nil, err
+        }
+        if bytesRead == 0 {
+            log.Errorf("action: receive_exact_message | result: fail | error: %v", "EOF")
+            return nil, fmt.Errorf("EOF")
+        }
+        totalBytesRead += bytesRead
+    }
+    return data, nil
 }
 
 // SendMessage ensures that all the message is sent to the server
