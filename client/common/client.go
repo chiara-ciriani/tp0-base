@@ -129,7 +129,6 @@ func (c *Client) StartClientLoop() {
             response, _, err := c.ReceiveMessage()
 
             if err != nil {
-                log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
                 return
             }
 
@@ -181,6 +180,8 @@ func (c *Client) GetLotteryWinners() error {
         }
         log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
 
+        c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
         winners := c.ReceiveWinnersRequestResponse()
         if winners != nil {
             log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
@@ -203,10 +204,6 @@ func (c *Client) GetLotteryWinners() error {
 func (c *Client) ReceiveWinnersRequestResponse() ([]uint32) {
     responseStatus, winnersBytes, err := c.ReceiveMessage()
     if err != nil {
-        return nil
-    }
-
-    if responseStatus == BET_NOT_FINISHED {
         return nil
     }
 
@@ -240,7 +237,16 @@ func (c *Client) SendEndMessage() error {
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
 
-    // TO DO: SI EL SERVIDOR ME MANDA UN OK, TENGO QUE AGREGARLO ACA
+    response, _, err := c.ReceiveMessage()
+    if err != nil {
+        return err
+    }
+
+    if response == OK {
+        log.Infof("action: receive_server_end_message_confirmation | result: success | client_id: %v", c.config.ID)
+    } else {
+        log.Errorf("action: receive_server_end_message_confirmation | result: fail | client_id: %v", c.config.ID)
+    }
 
     c.conn.Close()
     return nil
@@ -275,7 +281,6 @@ func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
 func (c *Client) ReceiveMessage() (ResponseStatus, []byte, error) {
     message_len_bytes, err := c.ReceiveExactMessage(MSG_SIZE_LEN)
     if err != nil {
-        log.Errorf("action: receive_message | result: fail | error: %v", err)
         return ResponseStatus(1), nil, err
     }
 
@@ -283,7 +288,6 @@ func (c *Client) ReceiveMessage() (ResponseStatus, []byte, error) {
 
     received_message, err := c.ReceiveExactMessage(message_len)
     if err != nil {
-        log.Errorf("action: receive_message | result: fail | error: %v", err)
         return ResponseStatus(1), nil, err
     }
 
@@ -298,18 +302,15 @@ func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
     data := make([]byte, lengthToRead)
     bytesRead, err := c.conn.Read(data)
     if err != nil {
-        log.Errorf("action: receive_exact_message | result: fail | error: %v", err)
         return nil, err
     }
     totalBytesRead := bytesRead
     for totalBytesRead < lengthToRead {
         bytesRead, err = c.conn.Read(data[totalBytesRead:])
         if err != nil {
-            log.Errorf("action: receive_exact_message | result: fail | error: %v", err)
             return nil, err
         }
         if bytesRead == 0 {
-            log.Errorf("action: receive_exact_message | result: fail | error: %v", "EOF")
             return nil, fmt.Errorf("EOF")
         }
         totalBytesRead += bytesRead

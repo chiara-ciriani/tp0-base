@@ -1,6 +1,7 @@
 import signal
 import socket
 import logging
+import multiprocessing
 
 from common.exceptions import InvalidMessageError
 from common.message_type import MessageType
@@ -23,8 +24,10 @@ class Server:
         self._client_socket = None
         self._down = False
         self._required_agencies = total_agencies
-        self._done_agencies = set()
         self._winners = {}
+        self._file_lock = multiprocessing.Lock()
+        self._barrier = multiprocessing.Barrier(total_agencies)
+        self._processes = []
 
         signal.signal(signal.SIGTERM, self.__handle_sigterm)
 
@@ -37,15 +40,18 @@ class Server:
         finishes, servers starts to accept new connections again
         """
 
-        # TODO: Modify this program to handle signal to graceful shutdown
-        # the server
         while not self._down:
             try:
                 self.__accept_new_connection()
                 if self._down: return
-                self.__handle_client_connection()
             except OSError:
                 break
+            process = multiprocessing.Process(target=self.__handle_client_connection)
+            self._processes.append(process)
+            process.start()
+        
+        for process in self._processes:
+            process.join()
 
     def __handle_sigterm(self, signum, frame):
         logging.info('action: sigterm_received | result: in_progress')
@@ -62,6 +68,12 @@ class Server:
         self._server_socket.shutdown(socket.SHUT_RDWR)
         self._server_socket.close()
         logging.info('action: close_server_socket | result: success')
+
+        logging.info('action: terminate_processes | result: in_progress')
+        if self._processes:
+            for process in self._processes:
+                process.terminate()
+        logging.info('action: terminate_processes | result: success')
 
         logging.info('action: sigterm_received | result: success')
 
@@ -116,7 +128,8 @@ class Server:
         Handle a batch message from the client
         """
         bets = self.__obtain_bets(agency_id, message)
-        store_bets(bets)
+        with self._file_lock:
+            store_bets(bets)
         logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
 
         response_status = ResponseStatus.OK
@@ -127,15 +140,10 @@ class Server:
         Handle an end message from the client
         """
         logging.info(f"action: client_finished_sending_bets | result: success | agency: {agency_id}")
-        self._done_agencies.add(agency_id)
-        if len(self._done_agencies) == self._required_agencies:
-            logging.info(f"action: all_agencies_finished_sending_bets | result: success")
-            self._winners = get_winners(self._required_agencies)
-            logging.info("action: sorteo | result: success")
-        
-        # TO DO: MANDO UN OK??
-        # TENGO QUE REVISAR PORQUE NO SE SI EL CLIENTE SE DESCONECTO
-        
+                
+        response_status = ResponseStatus.OK
+        self.__send_message(response_status.value)
+
     def __build_winners_message(self, agency_id):
         winners = self._winners.get(agency_id, [])
         encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in winners])
@@ -146,15 +154,40 @@ class Server:
         Handle a winners request from the client
         """
         logging.info(f"action: client_requested_winners | result: in_progress | agency: {agency_id}")
-        if len(self._done_agencies) == self._required_agencies:
-            response_status = ResponseStatus.SEND_WINNERS
-            response_message = self.__build_winners_message(agency_id)
-            self.__send_message(response_status.value, response_message)
-            logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
-        else:
-            response_status = ResponseStatus.BET_NOT_FINISHED
-            self.__send_message(response_status.value)
-            logging.info(f"action: bet_not_finished_message_sent | result: success | agency: {agency_id}")
+        with self._done_agencies_convar:
+            logging.info(f"DEBUG | done_agencies: {self._done_agencies} | required_agencies: {self._required_agencies}")
+            while len(self._done_agencies) < self._required_agencies:
+                logging.info(f"action: agency_waiting | result: in_progress | agency: {agency_id}")
+                self._done_agencies_convar.wait()
+
+            logging.info(f"action: agency_waiting | result: success | agency: {agency_id}")
+        
+        with self._file_lock:
+            if not self._winners:
+                self._winners = get_winners(self._required_agencies)
+
+        response_status = ResponseStatus.SEND_WINNERS
+        response_message = self.__build_winners_message(agency_id)
+        self.__send_message(response_status.value, response_message)
+        logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
+        logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
+
+    def __handle_winners_request(self, agency_id):
+        """
+        Handle a winners request from the client
+        """
+        logging.info(f"action: client_requested_winners | result: in_progress | agency: {agency_id}")
+        self._barrier.wait()
+        
+        logging.info(f"action: all_agencies_finished_sending_bets | result: success")
+        with self._file_lock:
+            self._winners = get_winners(self._required_agencies)
+        logging.info("action: sorteo | result: success")
+        
+        response_status = ResponseStatus.SEND_WINNERS
+        response_message = self.__build_winners_message(agency_id)
+        self.__send_message(response_status.value, response_message)
+        logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
         logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
 
     def __handle_received_message(self, agency_id, message_type, message):
