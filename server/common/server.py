@@ -83,7 +83,7 @@ class Server:
         except OSError as e:
             logging.error("action: apuesta_recibida | result: fail | error: {e}")
             response_message = ResponseStatus.ERROR
-            self.__send_message(response_message)
+            self.__send_message(response_message.value)
         except InvalidMessageError as e:
             logging.error(f'action: receive_message | result: fail | error: {e}')
         finally:
@@ -122,7 +122,7 @@ class Server:
         logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
 
         response_message = ResponseStatus.OK
-        self.__send_message(response_message)
+        self.__send_message(response_message.value)
 
     def __handle_received_message(self, agency_id, message_type, message):
         """
@@ -159,18 +159,15 @@ class Server:
 
         return agency_id, message_type, received_message[AGENCY_ID_LEN+MSG_TYPE_LEN:]
     
-    def __encode_message(self, message):
-        return (str(message.value) + '\n').encode('utf-8')
-
-    def __send_message(self, message):
+    def __send_message(self, response_status):
         """
         Send a message to the client
         """
         total_sent = 0
-        message_bytes = self.__encode_message(message)
-        while total_sent < len(message_bytes):
+        response_status_bytes = response_status.to_bytes(MSG_TYPE_LEN, 'big')
+        while total_sent < len(response_status_bytes):
             try:
-                sent = self._client_socket.send(message_bytes[total_sent:])
+                sent = self._client_socket.send(response_status_bytes[total_sent:])
                 if sent == 0:
                     raise OSError("Socket connection broken")
                 total_sent += sent

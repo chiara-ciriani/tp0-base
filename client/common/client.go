@@ -1,7 +1,6 @@
 package common
 
 import (
-    "bufio"
     "encoding/csv"
     "fmt"
     "net"
@@ -10,7 +9,6 @@ import (
     "os"
     "os/signal"
     "syscall"
-    "strconv"
     "strings"
 
     "github.com/op/go-logging"
@@ -122,13 +120,29 @@ func (c *Client) StartClientLoop() {
             }
             log.Infof("action: send_batch_message | result: success| client_id: %v | batch_length: %v", c.config.ID, len(batch))
 
-            response, err := c.ReceiveMessage()
+            received_message, err := c.ReceiveExactMessage(1)
 
             if err != nil {
                 log.Errorf("action: receive_message| result: fail | client_id: %v | error: %v", c.config.ID, err)
                 return
             }
 
+            if err != nil {
+                log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+                    c.config.ID,
+                    err,
+                )
+                return
+            }
+            
+            message_type := int(received_message[0])
+            response_status := ResponseStatus(message_type)
+    
+            log.Infof("action: receive_message | result: success | client_id: %v | response_status: %v",
+                c.config.ID,
+                response_status,
+            )
+    
             // Log status
             if response_status == OK {
                 log.Infof("action: receive_server_confirmation | result: success | client_id: %v", c.config.ID)
@@ -198,20 +212,25 @@ func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
     return bets, nil
 }
 
-// ReceiveMessage reads a message from the server
-func (c *Client) ReceiveMessage() (ResponseStatus, error) {
-    reader := bufio.NewReader(c.conn)
-    message, err := reader.ReadString('\n')
+// TO DO: DOCU
+func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
+    data := make([]byte, lengthToRead)
+    bytesRead, err := c.conn.Read(data)
     if err != nil {
-        log.Errorf("action: receive_message | result: fail | error: %v", err)	
-        return ResponseStatus(1), err
+        return nil, err
     }
-    response, err := strconv.Atoi(strings.TrimSpace(message))
-    if err != nil {
-        log.Errorf("action: string_conversion | result: fail | error: %v", err)	
-        return ResponseStatus(1), err
+    totalBytesRead := bytesRead
+    for totalBytesRead < lengthToRead {
+        bytesRead, err = c.conn.Read(data[totalBytesRead:])
+        if err != nil {
+            return nil, err
+        }
+        if bytesRead == 0 {
+            return nil, fmt.Errorf("EOF")
+        }
+        totalBytesRead += bytesRead
     }
-    return ResponseStatus(response), nil
+    return data, nil
 }
 
 // SendMessage ensures that all the message is sent to the server
