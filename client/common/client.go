@@ -93,16 +93,6 @@ func (c *Client) createClientSocket() error {
     return nil
 }
 
-// Shutdown Shuts down gracefully the client by closing the connection
-func (c *Client) Shutdown() {
-    log.Infof("action: shutdown | result: in_progress | client_id: %v", c.config.ID)
-    if c.conn != nil {
-        c.conn.Close()
-    }
-    c.down = true
-    log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
-}
-
 // StartClientLoop Send messages to the client until some time threshold is met
 func (c *Client) StartClientLoop() {
     file, err := os.Open(fmt.Sprintf("./.data/agency-%v.csv", c.config.ID))
