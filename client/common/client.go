@@ -68,10 +68,12 @@ func NewClient(config ClientConfig) *Client {
 func (c *Client) Shutdown() {
     log.Infof("action: shutdown | result: in_progress | client_id: %v", c.config.ID)
     if c.conn != nil {
+		log.Infof("action: close_connection | result: in_progress | client_id: %v", c.config.ID)
         c.conn.Close()
+		log.Infof("action: close_connection | result: success | client_id: %v", c.config.ID)
     }
+	log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
 	c.down = true
-    log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
 }
 
 // CreateClientSocket Initializes client socket. In case of

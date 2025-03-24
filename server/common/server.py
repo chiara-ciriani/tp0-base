@@ -56,18 +56,17 @@ class Server:
     def __handle_sigterm(self, signum, frame):
         logging.info('action: sigterm_received | result: in_progress')
 
-        logging.info('action: close_client_socket | result: in_progress')
         if self._client_socket:
-            self._client_socket.shutdown(socket.SHUT_RDWR)
+            logging.info('action: close_client_socket | result: in_progress')
             self._client_socket.close()
             self._client_socket = None
-        logging.info('action: close_client_socket | result: success')
+            logging.info('action: close_client_socket | result: success')
 
         logging.info('action: close_server_socket | result: in_progress')
-        self._down = True
         self._server_socket.shutdown(socket.SHUT_RDWR)
         self._server_socket.close()
         logging.info('action: close_server_socket | result: success')
+        self._down = True
 
         logging.info('action: terminate_processes | result: in_progress')
         if self._processes:
