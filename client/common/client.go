@@ -33,9 +33,22 @@ type ClientConfig struct {
 
 // Client Entity that encapsulates how
 type Client struct {
-    config ClientConfig
-    conn   net.Conn
-    down   bool
+	config ClientConfig
+	conn   net.Conn
+	down   bool
+}
+
+// HandleSigterm handles the SIGTERM signal to gracefully shutdown the client
+func (c *Client) HandleSigterm() {
+    sigs := make(chan os.Signal, 1)
+    signal.Notify(sigs, syscall.SIGTERM)
+
+    go func() {
+        sig := <-sigs
+        log.Infof("action: sigterm_received | result: in_progress | signal: %v", sig)
+        c.Shutdown()
+        log.Infof("action: sigterm_received | result: success | signal: %v", sig)
+    }()
 }
 
 // NewClient Initializes a new client receiving the configuration
@@ -45,7 +58,20 @@ func NewClient(config ClientConfig) *Client {
         config: config,
         down:  false,
     }
-    return client
+
+	go client.HandleSigterm()
+
+	return client
+}
+
+// Shutdown Shuts down gracefully the client by closing the connection
+func (c *Client) Shutdown() {
+    log.Infof("action: shutdown | result: in_progress | client_id: %v", c.config.ID)
+    if c.conn != nil {
+        c.conn.Close()
+    }
+	c.down = true
+    log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
 }
 
 // CreateClientSocket Initializes client socket. In case of
@@ -65,28 +91,8 @@ func (c *Client) createClientSocket() error {
     return nil
 }
 
-// Shutdown Shuts down gracefully the client by closing the connection
-func (c *Client) Shutdown() {
-    log.Infof("action: shutdown | result: in_progress | client_id: %v", c.config.ID)
-    if c.conn != nil {
-        c.conn.Close()
-    }
-    c.down = true
-    log.Infof("action: shutdown | result: success | client_id: %v", c.config.ID)
-}
-
 // StartClientLoop Send messages to the client until some time threshold is met
 func (c *Client) StartClientLoop() {
-    sigs := make(chan os.Signal, 1)
-    signal.Notify(sigs, syscall.SIGTERM)
-
-    go func() {
-        sig := <-sigs
-        log.Infof("action: sigterm_received | result: in_progress | signal: %v", sig)
-        c.Shutdown()
-        log.Infof("action: sigterm_received | result: success | signal: %v", sig)
-    }()
-
     file, err := os.Open(fmt.Sprintf("./.data/agency-%v.csv", c.config.ID))
     if err != nil {
         log.Errorf("action: open_file | result: fail | client_id: %v | error: %v", c.config.ID, err)
