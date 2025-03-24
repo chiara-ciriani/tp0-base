@@ -5,10 +5,7 @@ services:
     image: server:latest
     entrypoint: python3 /main.py
     environment:
-      - PYTHONUNBUFFERED=1
-      - LOGGING_LEVEL=DEBUG
-    volumes:
-      - ./server/config.ini:/config.ini
+    - PYTHONUNBUFFERED=1
     networks:
     - testing_net
     volumes:
@@ -18,10 +15,7 @@ services:
     image: client:latest
     entrypoint: /client
     environment:
-      - CLI_ID=1
-      - CLI_LOG_LEVEL=DEBUG
-    volumes:
-      - ./client/config.yaml:/config.yaml
+    - CLI_ID=1
     networks:
     - testing_net
     depends_on:
