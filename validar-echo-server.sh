@@ -7,7 +7,7 @@ SERVER_CONTAINER="server"
 
 RESPONSE=$(docker run --rm --network tp0_testing_net alpine:latest sh -c "echo $MESSAGE | nc -w $TIMEOUT $SERVER_CONTAINER $PORT")
 
-if [ "$RESPONSE" == "$MESSAGE" ]; then
+if [ "$RESPONSE" = "$MESSAGE" ]; then
     echo "action: test_echo_server | result: success"
     exit 0
 else
