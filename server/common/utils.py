@@ -1,13 +1,16 @@
 import csv
 import datetime
-import time
-
 
 """ Bets storage location. """
 STORAGE_FILEPATH = "./bets.csv"
 """ Simulated winner number in the lottery contest. """
 LOTTERY_WINNER_NUMBER = 7574
 
+FIRST_NAME_LENGTH_LEN = 1
+LAST_NAME_LENGTH_LEN = 1
+DOCUMENT_LEN = 4
+BIRTHDATE_LEN = 10
+NUMBER_LEN = 2
 
 """ A lottery bet registry. """
 class Bet:
@@ -29,6 +32,36 @@ class Bet:
 
     def get_number(self) -> int:
         return self.number
+    
+    @staticmethod
+    def deserialize(agency_id: int, bet_info: bytes) -> 'Bet':
+        index = 0
+        
+        # First name
+        first_name_length = int.from_bytes([bet_info[index]], 'big')
+        index += FIRST_NAME_LENGTH_LEN
+        first_name = bet_info[index:index+first_name_length].decode('utf-8')
+        index += first_name_length
+        
+        # Last name
+        last_name_length = int.from_bytes([bet_info[index]], 'big')
+        index += LAST_NAME_LENGTH_LEN
+        last_name = bet_info[index:index+last_name_length].decode('utf-8')
+        index += last_name_length
+
+        # Document
+        document = int.from_bytes(bet_info[index:index+DOCUMENT_LEN], 'big')
+        index += DOCUMENT_LEN
+
+        # Birthdate
+        birthdate = bet_info[index:index+BIRTHDATE_LEN].decode('utf-8')
+        index += BIRTHDATE_LEN
+
+        # Number
+        number = int.from_bytes(bet_info[index:index+NUMBER_LEN], 'big')
+        index += NUMBER_LEN
+
+        return Bet(agency_id, first_name, last_name, document, birthdate, number)
 
 """ Checks whether a bet won the prize or not. """
 def has_won(bet: Bet) -> bool:

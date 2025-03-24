@@ -3,8 +3,12 @@ import socket
 import logging
 
 from common.exceptions import ClientClosedConnection
-from common.message import CONFIRMATION, ERROR, Message
+from common.response_status import ResponseStatus
 from common.utils import Bet, store_bets
+
+MSG_SIZE_LEN = 2
+AGENCY_ID_LEN = 1
+MSG_TYPE_LEN = 1
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -62,23 +66,25 @@ class Server:
         client socket will also be closed
         """
         try:
-            message = self.__receive_message()
-            logging.info(f'action: receive_message | result: success | message: {message}')
-            bet = self.__parse_message(message)
+            agency_id, message = self.__receive_message()
+            logging.info(f'action: receive_message | result: success | agency_id: {agency_id}')
+            bet = Bet.deserialize(agency_id, message)
             store_bets([bet])
             logging.info(f'action: apuesta_almacenada | result: success | dni: {bet.get_document()} | numero: {bet.get_number()}')
-            response_message = Message(CONFIRMATION, "Bet received").serialize()
-            self.__send_message(response_message)
+            
+            response_message = ResponseStatus.OK
+            self.__send_message(response_message.value)
 
         except ClientClosedConnection as e:
             logging.error(f"action: client_closed_connection | result: fail | error: {e}")
         except OSError as e:
             logging.error("action: apuesta_almacenada | result: fail | error: {e}")
-            response_message = Message(ERROR, str(e)).serialize()
-            self.__send_message(response_message)
+            response_message = ResponseStatus.ERROR
+            self.__send_message(response_message.value)
         except ValueError as e:
             logging.error(f"action: parse_message | result: fail | error: {e}")
-            response_message = Message(ERROR, str(e)).serialize()
+            response_message = ResponseStatus.ERROR
+            self.__send_message(response_message.value)
         finally:
             self._client_socket.close()
 
@@ -96,38 +102,35 @@ class Server:
         logging.info(f'action: accept_connections | result: success | ip: {addr[0]}')
         self._client_socket = c
 
-    def __parse_message(self, message):
-        """
-        Parse the message and return a Bet instance
-        """
-        try:
-            agency_id, bet_info = message.split(" ", 1)
-            first_name, last_name, document, birthdate, number = bet_info.split(",")
-            return Bet(agency_id, first_name, last_name, document, birthdate, number)
-        except ValueError as e:
-            raise ValueError(f"Invalid message format: {message}") from e
+    def __receive_exact_message(self, length_to_read):
+        message = self._client_socket.recv(length_to_read)
+        while len(message) < length_to_read:
+            message_read = self._client_socket.recv(length_to_read - len(message))
+            if not message_read: 
+                raise EOFError("EOF")
+            message += message_read
+        return message
 
     def __receive_message(self):
         """
         Receive a message from the client
         """
-        message = ''
-        while message == '' or message[-1] != '\n':
-            received_message = self._client_socket.recv(1024).decode('utf-8')
-            if received_message == '':
-                raise ClientClosedConnection('Connection closed by client')
-            message += received_message
-        return message.rstrip()
+        received_message = self.__receive_exact_message(MSG_SIZE_LEN)
+        message_size = int.from_bytes(received_message, 'big')
 
-    def __send_message(self, message):
+        received_message = self.__receive_exact_message(message_size)
+        agency_id = int.from_bytes(received_message[0:AGENCY_ID_LEN], 'big')
+        return agency_id, received_message[AGENCY_ID_LEN:]
+
+    def __send_message(self, response_status):
         """
         Send a message to the client
         """
         total_sent = 0
-        message_bytes = message.encode('utf-8')
-        while total_sent < len(message_bytes):
+        response_status_bytes = response_status.to_bytes(MSG_TYPE_LEN, 'big')
+        while total_sent < len(response_status_bytes):
             try:
-                sent = self._client_socket.send(message_bytes[total_sent:])
+                sent = self._client_socket.send(response_status_bytes[total_sent:])
                 if sent == 0:
                     raise OSError("Socket connection broken")
                 total_sent += sent

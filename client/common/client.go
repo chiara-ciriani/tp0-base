@@ -1,14 +1,12 @@
 package common
 
 import (
-    "bufio"
     "fmt"
     "net"
     "time"
     "os"
     "os/signal"
     "syscall"
-    "strings"
 
     "github.com/op/go-logging"
 )
@@ -90,10 +88,25 @@ func (c *Client) StartClientLoop() {
         // Create the connection the server in every loop iteration. Send an
         c.createClientSocket()
 
-        bet := NewBetFromEnv()
-        betMessage := BuildBetMessage(c.config.ID, bet)
+        bet, err := NewBetFromEnv()
+        if err != nil {
+            log.Errorf("action: build_bet_from_env | result: fail | client_id: %v | error: %v",
+                c.config.ID,
+                err,
+            )
+            return
+        }
 
-        log.Infof("action: send_message | result: in_progress | client_id: %v | msg: %v", c.config.ID, betMessage)
+        betMessage, err := BuildBetMessage(c.config.ID, bet)
+        if err != nil {
+            log.Errorf("action: build_bet_message | result: fail | client_id: %v | error: %v",
+                c.config.ID,
+                err,
+            )
+            return
+        }
+
+        log.Infof("action: send_message | result: in_progress | client_id: %v", c.config.ID)
         if err := c.SendMessage(betMessage); err != nil {
             log.Errorf("action: send_message | result: fail | client_id: %v | error: %v",
                 c.config.ID,
@@ -102,7 +115,7 @@ func (c *Client) StartClientLoop() {
             return
         }
 
-        msg, err := c.ReceiveMessage()
+        received_message, err := c.ReceiveExactMessage(1)
         c.conn.Close()
 
         if err != nil {
@@ -112,22 +125,24 @@ func (c *Client) StartClientLoop() {
             )
             return
         }
+        
+        message_type := int(received_message[0])
+        response_status := ResponseStatus(message_type)
 
-        log.Infof("action: receive_message | result: success | client_id: %v | msg: %v",
+        log.Infof("action: receive_message | result: success | client_id: %v | response_status: %v",
             c.config.ID,
-            msg,
+            response_status,
         )
 
-        parsedMessage, err := Deserialize(msg)
-        if err != nil {
-            log.Errorf("action: parse_message | result: fail | client_id: %v | error: %v",
-                c.config.ID,
-                err,
-            )
+        // Log status
+        if response_status == OK {
+            log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"))
+        } else if response_status == ERROR {
+            log.Errorf("action: apuesta_enviada | result: fail | dni: %v | numero: %v", os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"))
+        } else {
+            log.Errorf("action: unknown_message_type | result: fail | client_id: %v", c.config.ID)
             return
         }
-
-        parsedMessage.LogMessage(os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"), c.config.ID)
 
         // Wait a time between sending one message and the next one
         time.Sleep(c.config.LoopPeriod)
@@ -136,38 +151,33 @@ func (c *Client) StartClientLoop() {
     log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
 }
 
-// BuildBetMessage constructs the message to be sent to the server with the bet information
-func BuildBetMessage(id string, bet Bet) string {
-    return fmt.Sprintf("%s %s\n", id, bet.Serialize())
-}
-
-// ReceiveMessage reads a message until a newline is encountered
-func (c *Client) ReceiveMessage() (string, error) {
-    reader := bufio.NewReader(c.conn)
-    message, err := reader.ReadString('\n')
+// TO DO: DOCU
+func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
+    data := make([]byte, lengthToRead)
+    bytesRead, err := c.conn.Read(data)
     if err != nil {
-        log.Errorf("action: receive_message | result: fail | dni: %v | numero: %v | error: %v", 
-            os.Getenv("DOCUMENTO"), 
-            os.Getenv("NUMERO"), 
-            err,
-        )	
-        return "", err
+        return nil, err
     }
-    return strings.TrimSpace(message), nil
+    totalBytesRead := bytesRead
+    for totalBytesRead < lengthToRead {
+        bytesRead, err = c.conn.Read(data[totalBytesRead:])
+        if err != nil {
+            return nil, err
+        }
+        if bytesRead == 0 {
+            return nil, fmt.Errorf("EOF")
+        }
+        totalBytesRead += bytesRead
+    }
+    return data, nil
 }
 
 // SendMessage ensures that all the message is sent to the server
-func (c *Client) SendMessage(message string) error {
-    messageBytes := []byte(message)
+func (c *Client) SendMessage(message []byte) error {
     totalSent := 0
-    for totalSent < len(messageBytes) {
-        sent, err := c.conn.Write(messageBytes[totalSent:])
+    for totalSent < len(message) {
+        sent, err := c.conn.Write(message[totalSent:])
         if err != nil {
-            log.Errorf("action: send_message | result: fail | dni: %v | numero: %v | error: %v", 
-                os.Getenv("DOCUMENTO"), 
-                os.Getenv("NUMERO"), 
-                err,
-            )
             return err
         }
         totalSent += sent

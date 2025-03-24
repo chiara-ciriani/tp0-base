@@ -5,30 +5,31 @@ services:
     image: server:latest
     entrypoint: python3 /main.py
     environment:
-      - PYTHONUNBUFFERED=1
-      - LOGGING_LEVEL=DEBUG
-    volumes:
-      - ./server/config.ini:/config.ini
+    - PYTHONUNBUFFERED=1
     networks:
-      - testing_net
-
+    - testing_net
+    volumes:
+    - ./server/config.ini:/config.ini
   client1:
     container_name: client1
     image: client:latest
     entrypoint: /client
     environment:
-      - CLI_ID=1
-      - CLI_LOG_LEVEL=DEBUG
-    volumes:
-      - ./client/config.yaml:/config.yaml
+    - CLI_ID=1
+    - NOMBRE=Santiago Lionel
+    - APELLIDO=Lorca
+    - DOCUMENTO=30904465
+    - NACIMIENTO=1999-03-17
+    - NUMERO=7574
     networks:
-      - testing_net
+    - testing_net
     depends_on:
-      - server
-
+    - server
+    volumes:
+    - ./client/config.yaml:/config.yaml
 networks:
   testing_net:
     ipam:
       driver: default
       config:
-        - subnet: 172.25.125.0/24
+      - subnet: 172.25.125.0/24
