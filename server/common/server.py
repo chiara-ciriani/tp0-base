@@ -39,8 +39,6 @@ class Server:
         finishes, servers starts to accept new connections again
         """
 
-        # TODO: Modify this program to handle signal to graceful shutdown
-        # the server
         while not self._down:
             try:
                 self.__accept_new_connection()
