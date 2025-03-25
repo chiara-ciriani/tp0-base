@@ -40,10 +40,17 @@ class Server:
         while not self._down:
             try:
                 self.__accept_new_connection()
-                if self._down: return
+                if self._down or not self._client_socket: 
+                    break
                 self.__handle_client_connection()
-            except OSError:
-                break
+            except OSError as e:
+                if not self._client_socket:
+                    logging.error(f"action: handle_client_connection | result: client disconnected")
+                    break
+                else:
+                    logging.error(f"action: handle_client_connection | result: fail | error: {e}")
+                    self.__close_client_connection()
+                    break
 
     def __handle_sigterm(self, signum, frame):
         logging.info('action: sigterm_received | result: in_progress')
@@ -66,24 +73,29 @@ class Server:
     def __handle_client_connection(self):
         """
         Read message from a specific client socket and closes the socket
-
+    
         If a problem arises in the communication with the client, the
         client socket will also be closed
         """
         try:
-            agency_id, message_type, message = self.__receive_message()
-            logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
-            
-            self.__handle_received_message(agency_id, message_type, message)
-
+            while True:
+                agency_id, message_type, message = self.__receive_message()
+                logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
+                
+                self.__handle_received_message(agency_id, message_type, message)
+    
         except OSError as e:
-            logging.error("action: apuesta_recibida | result: fail | error: {e}")
+            logging.error(f"action: apuesta_recibida | result: fail | error: {e}")
             response_status = ResponseStatus.ERROR
             self.__send_message(response_status.value)
         except InvalidMessageError as e:
             logging.error(f'action: receive_message | result: fail | error: {e}')
+        except EOFError:
+            logging.info("action: client_disconnected | result: success")
         finally:
-            self._client_socket.close()
+            if self._client_socket:
+                self._client_socket.close()
+                self._client_socket = None
 
     def __accept_new_connection(self):
         """
