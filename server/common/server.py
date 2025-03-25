@@ -24,7 +24,6 @@ class Server:
         self._client_socket = None
         self._down = False
         self._required_agencies = total_agencies
-        self._winners = {}
         self._file_lock = multiprocessing.Lock()
         self._barrier = multiprocessing.Barrier(total_agencies)
         self._processes = []
@@ -39,13 +38,20 @@ class Server:
         communication with a client. After client with communucation
         finishes, servers starts to accept new connections again
         """
-
+        
         while not self._down:
             try:
                 self.__accept_new_connection()
-                if self._down: return
-            except OSError:
-                break
+                if self._down or not self._client_socket: 
+                    break
+            except OSError as e:
+                if not self._client_socket:
+                    logging.error(f"action: handle_client_connection | result: client disconnected")
+                    break
+                else:
+                    logging.error(f"action: handle_client_connection | result: fail | error: {e}")
+                    self.__close_client_connection()
+                    break
             process = multiprocessing.Process(target=self.__handle_client_connection)
             self._processes.append(process)
             process.start()
@@ -84,13 +90,15 @@ class Server:
         client socket will also be closed
         """
         try:
-            agency_id, message_type, message = self.__receive_message()
-            logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
-            
-            self.__handle_received_message(agency_id, message_type, message)
+            finished = False
+            while not finished:
+                agency_id, message_type, message = self.__receive_message()
+                logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
+
+                finished = self.__handle_received_message(agency_id, message_type, message)
 
         except OSError as e:
-            logging.error("action: apuesta_recibida | result: fail | error: {e}")
+            logging.error(f"action: apuesta_recibida | result: fail | error: {e}")
             response_status = ResponseStatus.ERROR
             self.__send_message(response_status.value)
         except InvalidMessageError as e:
@@ -143,60 +151,42 @@ class Server:
         response_status = ResponseStatus.OK
         self.__send_message(response_status.value)
 
-    def __build_winners_message(self, agency_id):
-        winners = self._winners.get(agency_id, [])
-        encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in winners])
+    def __build_winners_message(self, agency_id, winners):
+        agency_winners = winners.get(agency_id, [])
+        encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in agency_winners])
         return encoded_winners
 
-    def __handle_winners_request(self, agency_id):
-        """
-        Handle a winners request from the client
-        """
-        logging.info(f"action: client_requested_winners | result: in_progress | agency: {agency_id}")
-        with self._done_agencies_convar:
-            logging.info(f"DEBUG | done_agencies: {self._done_agencies} | required_agencies: {self._required_agencies}")
-            while len(self._done_agencies) < self._required_agencies:
-                logging.info(f"action: agency_waiting | result: in_progress | agency: {agency_id}")
-                self._done_agencies_convar.wait()
-
-            logging.info(f"action: agency_waiting | result: success | agency: {agency_id}")
-        
-        with self._file_lock:
-            if not self._winners:
-                self._winners = get_winners(self._required_agencies)
-
+    def __send_winners(self, agency_id, winners):
         response_status = ResponseStatus.SEND_WINNERS
-        response_message = self.__build_winners_message(agency_id)
+        response_message = self.__build_winners_message(agency_id, winners)
         self.__send_message(response_status.value, response_message)
         logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
-        logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
 
     def __handle_winners_request(self, agency_id):
         """
         Handle a winners request from the client
         """
-        logging.info(f"action: client_requested_winners | result: in_progress | agency: {agency_id}")
+        logging.info(f"action: waiting_for_all_bets | result: in_progress | agency: {agency_id}")
         self._barrier.wait()
         
         logging.info(f"action: all_agencies_finished_sending_bets | result: success")
         with self._file_lock:
-            self._winners = get_winners(self._required_agencies)
+            winners = get_winners(self._required_agencies)
         logging.info("action: sorteo | result: success")
         
-        response_status = ResponseStatus.SEND_WINNERS
-        response_message = self.__build_winners_message(agency_id)
-        self.__send_message(response_status.value, response_message)
-        logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
-        logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
+        self.__send_winners(agency_id, winners)
+        return True
 
     def __handle_received_message(self, agency_id, message_type, message):
         """
         Handle a received message from the client
         """
         if message_type == MessageType.BATCH:
-            return self.__handle_batch_message(agency_id, message)
+            self.__handle_batch_message(agency_id, message)
+            return False
         elif message_type == MessageType.BATCH_END:
-            return self.__handle_batch_end_message(agency_id)
+            self.__handle_batch_end_message(agency_id)
+            return False
         elif message_type == MessageType.WINNERS_REQUEST:
             return self.__handle_winners_request(agency_id)
         

@@ -102,6 +102,10 @@ func (c *Client) StartClientLoop() {
     }
     defer file.Close()
 
+    if err := c.createClientSocket(); err != nil {
+        return
+    }
+
     reader := csv.NewReader(file)
 
     for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
@@ -117,10 +121,6 @@ func (c *Client) StartClientLoop() {
         }
 
         if len(batch) > 0 {
-            if err := c.createClientSocket(); err != nil {
-                return
-            }
-
             batchMessage, err := BuildBatchMessage(c.config.ID, batch)
             if err != nil {
                 log.Errorf("action: build_batch_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
@@ -168,38 +168,29 @@ func (c *Client) StartClientLoop() {
         return
     }
     log.Infof("action: get_lottery_winners | result: success | client_id: %v", c.config.ID)
+    c.conn.Close()
 }
 
 // TO DO: DOCUMENTACION
 func (c *Client) GetLotteryWinners() error {
-    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-        if err := c.createClientSocket(); err != nil {
-            return err
-        }
-        // Send winners request message
-        winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
-        if err != nil {
-            log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-            return err
-        }
-        if err := c.SendMessage(winnersRequestMessage); err != nil {
-            log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-            return err
-        }
-        log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
-
-        c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-        winners := c.ReceiveWinnersRequestResponse()
-        if winners != nil {
-            log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
-            break
-        }
-        
-        c.conn.Close()
-        
-        time.Sleep(c.config.LoopPeriod)
+    // Send winners request message
+    winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
+    if err != nil {
+        log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+        return err
     }
+    if err := c.SendMessage(winnersRequestMessage); err != nil {
+        log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+        return err
+    }
+    log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
+
+    winners := c.ReceiveWinnersRequestResponse()
+    if winners == nil {
+        log.Infof("action: consulta_ganadores | result: fail | client_id: %v", c.config.ID)
+        return fmt.Errorf("No winners received")
+    }
+    log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
     return nil
 }
 
@@ -230,9 +221,6 @@ func (c *Client) ReceiveWinnersRequestResponse() ([]uint32) {
 
 // SendEndMessage Sends the end message to the server
 func (c *Client) SendEndMessage() error {
-    if err := c.createClientSocket(); err != nil {
-        return err
-    }
     // Send end message
     endMessage, err := BuildBatchEndMessage(c.config.ID)
     if err != nil {
@@ -243,20 +231,7 @@ func (c *Client) SendEndMessage() error {
         log.Errorf("action: send_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
         return err
     }
-    log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
 
-    response, _, err := c.ReceiveMessage()
-    if err != nil {
-        return err
-    }
-
-    if response == OK {
-        log.Infof("action: receive_server_end_message_confirmation | result: success | client_id: %v", c.config.ID)
-    } else {
-        log.Errorf("action: receive_server_end_message_confirmation | result: fail | client_id: %v", c.config.ID)
-    }
-
-    c.conn.Close()
     return nil
 }
 
