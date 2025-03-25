@@ -199,6 +199,7 @@ func (c *Client) GetLotteryWinners() error {
         
         time.Sleep(c.config.LoopPeriod)
     }
+    c.conn.Close()
     return nil
 }
 
@@ -246,9 +247,6 @@ func (c *Client) SendEndMessage() error {
         log.Errorf("action: send_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
         return err
     }
-    log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
-
-    // TO DO: SI EL SERVIDOR ME MANDA UN OK, TENGO QUE AGREGARLO ACA
 
     c.conn.Close()
     return nil

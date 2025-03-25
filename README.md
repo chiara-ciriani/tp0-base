@@ -415,3 +415,13 @@ server   | 2025-03-24 16:55:32 INFO     action: receive_message | result: succes
 client5  | 2025-03-24 16:55:32 INFO     action: consulta_ganadores | result: success | cant_ganadores: 0
 client5  | 2025-03-24 16:55:32 INFO     action: get_lottery_winners | result: success | client_id: 5
 ```
+
+Los resultados del sorteo son los siguientes:
+
+```
+client1  | 2025-03-24 21:55:03 INFO     action: consulta_ganadores | result: success | cant_ganadores: 2
+client2  | 2025-03-24 21:55:03 INFO     action: consulta_ganadores | result: success | cant_ganadores: 3
+client3  | 2025-03-24 21:55:03 INFO     action: consulta_ganadores | result: success | cant_ganadores: 3
+client4  | 2025-03-24 21:55:03 INFO     action: consulta_ganadores | result: success | cant_ganadores: 2
+client5  | 2025-03-24 21:55:03 INFO     action: consulta_ganadores | result: success | cant_ganadores: 0
+```

@@ -131,9 +131,6 @@ class Server:
             self._winners = get_winners(self._required_agencies)
             logging.info("action: sorteo | result: success")
         
-        # TO DO: MANDO UN OK??
-        # TENGO QUE REVISAR PORQUE NO SE SI EL CLIENTE SE DESCONECTO
-        
     def __build_winners_message(self, agency_id):
         winners = self._winners.get(agency_id, [])
         encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in winners])
