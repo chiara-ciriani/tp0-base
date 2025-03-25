@@ -165,7 +165,7 @@ class Server:
             self.__send_winners()
             logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
         else:
-            logging.info(f"action: waiting_for_all_bets | result: in progress | agency: {agency_id}")
+            logging.info(f"action: waiting_for_all_bets | result: in_progress | agency: {agency_id}")
         return True
 
     def __handle_received_message(self, agency_id, message_type, message):
