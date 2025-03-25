@@ -185,7 +185,12 @@ func (c *Client) GetLotteryWinners() error {
         return err
     }
     log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
+
     winners := c.ReceiveWinnersRequestResponse()
+    if winners == nil {
+        log.Infof("action: consulta_ganadores | result: fail | client_id: %v", c.config.ID)
+        return fmt.Errorf("No winners received")
+    }
     log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
     return nil
 }

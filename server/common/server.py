@@ -24,6 +24,7 @@ class Server:
         self._down = False
         self._required_agencies = total_agencies
         self._done_agencies = set()
+        self._clients_sockets = {}
         self._winners = {}
 
         signal.signal(signal.SIGTERM, self.__handle_sigterm)
@@ -73,17 +74,18 @@ class Server:
     def __handle_client_connection(self):
         """
         Read message from a specific client socket and closes the socket
-    
+
         If a problem arises in the communication with the client, the
         client socket will also be closed
         """
         try:
-            while True:
+            finished = False
+            while not finished:
                 agency_id, message_type, message = self.__receive_message()
                 logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
-                
-                self.__handle_received_message(agency_id, message_type, message)
-    
+
+                finished = self.__handle_received_message(agency_id, message_type, message)
+
         except OSError as e:
             logging.error(f"action: apuesta_recibida | result: fail | error: {e}")
             response_status = ResponseStatus.ERROR
@@ -92,10 +94,6 @@ class Server:
             logging.error(f'action: receive_message | result: fail | error: {e}')
         except EOFError:
             logging.info("action: client_disconnected | result: success")
-        finally:
-            if self._client_socket:
-                self._client_socket.close()
-                self._client_socket = None
 
     def __accept_new_connection(self):
         """
@@ -127,7 +125,7 @@ class Server:
         """
         bets = self.__obtain_bets(agency_id, message)
         store_bets(bets)
-        logging.info(f'action: apuesta_recibida | result: success | cantidad: {len(bets)}')
+        logging.info(f'action: apuesta_recibida | result: success | agency_id: {agency_id} | cantidad: {len(bets)}')
 
         response_status = ResponseStatus.OK
         self.__send_message(response_status.value)
@@ -148,30 +146,38 @@ class Server:
         encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in winners])
         return encoded_winners
 
+    def __send_winners(self):
+        for agency_id, client_socket in self._clients_sockets.items():
+            response_status = ResponseStatus.SEND_WINNERS
+            response_message = self.__build_winners_message(agency_id)
+            self.__send_message_to_socket(response_status.value, response_message, client_socket)
+            client_socket.close()
+            logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
+        self._client_socket = None
+        logging.info(f"action: all_winners_sent | result: success")
+
     def __handle_winners_request(self, agency_id):
         """
         Handle a winners request from the client
         """
-        logging.info(f"action: client_requested_winners | result: in_progress | agency: {agency_id}")
+        self._clients_sockets[agency_id] = self._client_socket
         if len(self._done_agencies) == self._required_agencies:
-            response_status = ResponseStatus.SEND_WINNERS
-            response_message = self.__build_winners_message(agency_id)
-            self.__send_message(response_status.value, response_message)
-            logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
+            self.__send_winners()
+            logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
         else:
-            response_status = ResponseStatus.BET_NOT_FINISHED
-            self.__send_message(response_status.value)
-            logging.info(f"action: bet_not_finished_message_sent | result: success | agency: {agency_id}")
-        logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
+            logging.info(f"action: waiting_for_all_bets | result: in progress | agency: {agency_id}")
+        return True
 
     def __handle_received_message(self, agency_id, message_type, message):
         """
         Handle a received message from the client
         """
         if message_type == MessageType.BATCH:
-            return self.__handle_batch_message(agency_id, message)
+            self.__handle_batch_message(agency_id, message)
+            return False
         elif message_type == MessageType.BATCH_END:
-            return self.__handle_batch_end_message(agency_id)
+            self.__handle_batch_end_message(agency_id)
+            return False
         elif message_type == MessageType.WINNERS_REQUEST:
             return self.__handle_winners_request(agency_id)
         
@@ -222,3 +228,20 @@ class Server:
             except OSError as e:
                 logging.error(f"action: send_message | result: fail | error: {e}")
                 break
+
+    def __send_message_to_socket(self, response_status, message, client_socket):
+        """
+        Send a message to the client
+        """
+        total_sent = 0
+        message_bytes = self.__build_message_to_client(response_status, message)
+        while total_sent < len(message_bytes):
+            try:
+                sent = client_socket.send(message_bytes[total_sent:])
+                if sent == 0:
+                    raise OSError("Socket connection broken")
+                total_sent += sent
+            except OSError as e:
+                logging.error(f"action: send_message | result: fail | error: {e}")
+                break
+
