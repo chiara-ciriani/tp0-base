@@ -63,6 +63,9 @@ class Server:
             process.join()
 
     def __handle_sigterm(self, signum, frame):
+        """
+        Handle the SIGTERM signal to gracefully shut down the server and terminate all processes.
+        """
         logging.info('action: sigterm_received | result: in_progress')
 
         if self._client_socket:
@@ -81,7 +84,7 @@ class Server:
         if self._processes:
             for process in self._processes:
                 process.terminate()
-        logging.info('action: terminate_processes | result: success')
+            logging.info('action: terminate_processes | result: success')
 
         logging.info('action: sigterm_received | result: success')
 
@@ -124,6 +127,9 @@ class Server:
         self._client_socket = c
 
     def __obtain_bets(self, agency_id, bet_info):
+        """
+        Deserialize and return a list of bets from the received message.
+        """
         bets=[]
         total_bytes = len(bet_info)
         total_bytes_deserialized = 0
@@ -154,6 +160,9 @@ class Server:
             logging.info(f"action: client_finished_sending_bets | result: success | agency: {agency_id}")
         
     def __build_winners_message(self, agency_id):
+        """"
+        Build and encode the winners message for the specified agency.
+        """
         with self._file_lock:
             winners = get_winners(self._required_agencies)
         agency_winners = winners.get(agency_id, [])
@@ -161,12 +170,15 @@ class Server:
         return encoded_winners
 
     def __send_winners(self, agency_id):
+        """
+        Send the winners message to the specified agency.
+        """
         response_status = ResponseStatus.SEND_WINNERS
         response_message = self.__build_winners_message(agency_id)
         self.__send_message(response_status.value, response_message)
         logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
 
-    def __handle_winners_request(self, agency_id):
+    def __handle_winners_request_message(self, agency_id):
         """
         Handle a winners request from the client
         """
@@ -191,12 +203,15 @@ class Server:
             self.__handle_batch_end_message(agency_id)
             return True
         elif message_type == MessageType.WINNERS_REQUEST:
-            self.__handle_winners_request(agency_id)
+            self.__handle_winners_request_message(agency_id)
             return True
         
         raise InvalidMessageError(f"Invalid message type: {message_type}")
 
     def __receive_exact_message(self, length_to_read):
+        """
+        Read an exact number of bytes from the client socket.
+        """
         message = self._client_socket.recv(length_to_read)
         while len(message) < length_to_read:
             message_read = self._client_socket.recv(length_to_read - len(message))
@@ -219,7 +234,7 @@ class Server:
     
     def __build_message_to_client(self, response_status, message=None):
         """
-        TO DO: documentar
+        Build a message to send to the client, including status and optional content.
         """
         response_status_bytes = response_status.to_bytes(MSG_TYPE_LEN, 'big')
         message_bytes = message if message else b''

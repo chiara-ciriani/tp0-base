@@ -93,7 +93,8 @@ func (c *Client) createClientSocket() error {
     return nil
 }
 
-// StartClientLoop Send messages to the client until some time threshold is met
+// StartClientLoop initializes the client, reads bets from a CSV file, and manages the betting process.
+// It creates a socket connection to the server, processes bets in batches, and retrieves lottery winners.
 func (c *Client) StartClientLoop() {
     file, err := os.Open(fmt.Sprintf("./.data/agency-%v.csv", c.config.ID))
     if err != nil {
@@ -107,58 +108,10 @@ func (c *Client) StartClientLoop() {
     }
 
     reader := csv.NewReader(file)
-
-    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-        if c.down {
-            log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-            return
-        }
-
-        batch, err := c.GetBetBatch(reader)
-        if err != nil {
-            log.Errorf("action: get_bet_batch | result: fail | client_id: %v | error: %v", c.config.ID, err)
-            return
-        }
-
-        if len(batch) > 0 {
-            batchMessage, err := BuildBatchMessage(c.config.ID, batch)
-            if err != nil {
-                log.Errorf("action: build_batch_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-                return
-            }
-
-            log.Infof("action: send_batch_message | result: in_progress | client_id: %v | batch_length: %v", c.config.ID, len(batch))
-            if err := c.SendMessage(batchMessage); err != nil {
-                log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-                return
-            }
-            log.Infof("action: send_batch_message | result: success | client_id: %v | batch_length: %v", c.config.ID, len(batch))
-
-            response, _, err := c.ReceiveMessage()
-
-            if err != nil {
-                return
-            }
-
-            // Log status
-            if response == OK {
-                log.Infof("action: receive_server_confirmation | result: success | client_id: %v", c.config.ID)
-            } else {
-                log.Errorf("action: receive_server_confirmation | result: fail | client_id: %v", c.config.ID)
-                return
-            }
-        }
-        if err == io.EOF {
-            break
-        }
-    }
-
-    log.Infof("action: send_end_message | result: in_progress | client_id: %v", c.config.ID)
-    if err := c.SendEndMessage(); err != nil {
-        log.Infof("action: send_end_message | result: fail | client_id: %v", c.config.ID)
+    if err := c.StartPlacingBets(reader); err != nil {
+        c.conn.Close()
         return
     }
-    log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
 
     c.conn.Close()
 
@@ -170,8 +123,104 @@ func (c *Client) StartClientLoop() {
     log.Infof("action: get_lottery_winners | result: success | client_id: %v", c.config.ID)
 }
 
-// TO DO: DOCUMENTACION
+// StartPlacingBets reads batches of bets from a CSV file and sends them to the server.
+// It handles the process of building batch messages, sending them, and receiving server confirmations.
+// If the client is marked as "down" or an error occurs, the process stops.
+func (c *Client) StartPlacingBets(reader *csv.Reader) error {
+    for {
+        batch, err := c.GetBetBatch(reader)
+        if len(batch) > 0 {
+            batchMessage, err := BuildBatchMessage(c.config.ID, batch)
+            if err != nil {
+                log.Errorf("action: build_batch_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+                return err
+            }
 
+            log.Infof("action: send_batch_message | result: in_progress | client_id: %v | batch_length: %v", c.config.ID, len(batch))
+            if err := c.SendMessage(batchMessage); err != nil {
+                log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+                return err
+            }
+            log.Infof("action: send_batch_message | result: success | client_id: %v | batch_length: %v", c.config.ID, len(batch))
+
+            response, _, err := c.ReceiveMessage()
+
+            if err != nil {
+                return err
+            }
+
+            // Log status
+            if response == OK {
+                log.Infof("action: receive_server_confirmation | result: success | client_id: %v", c.config.ID)
+            } else {
+                log.Errorf("action: receive_server_confirmation | result: fail | client_id: %v", c.config.ID)
+                return fmt.Errorf("Server response not OK")
+            }
+        }
+        if err != nil {
+            if err == io.EOF {
+                break
+            }
+            log.Errorf("action: read_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+    }
+
+    log.Infof("action: send_end_message | result: in_progress | client_id: %v", c.config.ID)
+    if err := c.SendEndMessage(); err != nil {
+        log.Infof("action: send_end_message | result: fail | client_id: %v", c.config.ID)
+        return err
+    }
+    log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
+    return nil
+}
+
+// GetBetBatch reads a batch of bets from a CSV file and transform them to a Bet struct
+func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
+    bets := []Bet{}
+    for i := 0; i < c.config.BatchMaxAmount; i++ {
+        data, err := reader.Read()
+        if err != nil {
+            return bets, err
+        }
+
+        bet, err := TransformStringToBet(strings.Join(data, BET_FIELDS_SEPARATOR))
+        if err != nil {
+            log.Errorf("action: transform_bet | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return bets, err
+        }
+
+        bets = append(bets, bet)
+    }
+    
+    return bets, nil
+}
+
+// SendEndMessage Sends the end message to the server
+func (c *Client) SendEndMessage() error {
+    // Send end message
+    endMessage, err := BuildBatchEndMessage(c.config.ID)
+    if err != nil {
+        log.Errorf("action: build_batch_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+        return err
+    }
+    if err := c.SendMessage(endMessage); err != nil {
+        log.Errorf("action: send_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+        return err
+    }
+
+    return nil
+}
+
+// GetLotteryWinners sends a request to the server to retrieve the lottery winners and processes the response.
+//
+// Behavior:
+// - Attempts to establish a new socket connection to the server for each request.
+// - Builds and sends a "winners request" message to the server.
+// - Waits for the server's response, which can either be:
+//   - `SEND_WINNERS`: The server sends the list of winners, which is logged and the process ends.
+//   - `BET_NOT_FINISHED`: The server indicates that not all bets are finished, so the client retries after a delay.
+// - Retries the request up to the configured `LoopAmount` times if the response is not `SEND_WINNERS`.
 func (c *Client) GetLotteryWinners() error {
     for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
         if err := c.createClientSocket(); err != nil {
@@ -203,12 +252,13 @@ func (c *Client) GetLotteryWinners() error {
     return nil
 }
 
-// ReceiveWinnersRequestResponse reads the response from the server to the winners request message
-// TO DO: TRADUCIR
-// Hay dos tipos de tipos de mensajes que el servidor puede enviar: SEND_WINNERS, BET_NOT_FINISHED
-// Si el servidor envía SEND_WINNERS, el cliente debe recibir los ganadores y mostrarlos en la consola
-// Si el servidor envía BET_NOT_FINISHED, el cliente debe esperar un tiempo y volver a enviar el mensaje de solicitud de ganadores
-// Devuelve los ganadores
+// ReceiveWinnersRequestResponse reads and processes the server's response to the winners request message.
+//
+// Behavior:
+// - Reads the response message from the server.
+// - If the response status is `BET_NOT_FINISHED`, it returns `nil` to indicate that the process should retry later.
+// - If the response status is `SEND_WINNERS`, it parses the list of winners from the response bytes and returns them.
+// - If an error occurs while receiving the message, it returns `nil`.
 func (c *Client) ReceiveWinnersRequestResponse() ([]uint32) {
     responseStatus, winnersBytes, err := c.ReceiveMessage()
     if err != nil {
@@ -232,48 +282,7 @@ func (c *Client) ReceiveWinnersRequestResponse() ([]uint32) {
     return nil
 }
 
-// SendEndMessage Sends the end message to the server
-func (c *Client) SendEndMessage() error {
-    // Send end message
-    endMessage, err := BuildBatchEndMessage(c.config.ID)
-    if err != nil {
-        log.Errorf("action: build_batch_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-        return err
-    }
-    if err := c.SendMessage(endMessage); err != nil {
-        log.Errorf("action: send_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-        return err
-    }
-
-    return nil
-}
-
-
-// GetBetBatch reads a batch of bets from a CSV file and transform them to a Bet struct
-func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
-    bets := []Bet{}
-    for i := 0; i < c.config.BatchMaxAmount; i++ {
-        data, err := reader.Read()
-        if err != nil {
-            if err.Error() == "EOF" {
-                break
-            }
-            log.Errorf("action: read_csv | result: fail | client_id: %v | error: %v", c.config.ID, err)
-            return bets, err
-        }
-
-        bet, err := TransformStringToBet(strings.Join(data, BET_FIELDS_SEPARATOR))
-        if err != nil {
-            log.Errorf("action: transform_bet | result: fail | client_id: %v | error: %v", c.config.ID, err)
-            return bets, err
-        }
-
-        bets = append(bets, bet)
-    }
-    return bets, nil
-}
-
-// TO DO: DOCU
+// ReceiveMessage reads a complete message from the server and extracts its components.
 func (c *Client) ReceiveMessage() (ResponseStatus, []byte, error) {
     message_len_bytes, err := c.ReceiveExactMessage(MSG_SIZE_LEN)
     if err != nil {
@@ -293,7 +302,7 @@ func (c *Client) ReceiveMessage() (ResponseStatus, []byte, error) {
     return response_status, received_message[MSG_TYPE_LEN:], nil
 }
 
-// TO DO: DOCU
+// ReceiveExactMessage reads an exact number of bytes from the server.
 func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
     data := make([]byte, lengthToRead)
     bytesRead, err := c.conn.Read(data)
