@@ -28,6 +28,19 @@ type Client struct {
     down   bool
 }
 
+// HandleSigterm handles the SIGTERM signal to gracefully shutdown the client
+func (c *Client) HandleSigterm() {
+    sigs := make(chan os.Signal, 1)
+    signal.Notify(sigs, syscall.SIGTERM)
+
+    go func() {
+        sig := <-sigs
+        log.Infof("action: sigterm_received | result: in_progress | signal: %v", sig)
+        c.Shutdown()
+        log.Infof("action: sigterm_received | result: success | signal: %v", sig)
+    }()
+}
+
 // NewClient Initializes a new client receiving the configuration
 // as a parameter
 func NewClient(config ClientConfig) *Client {
@@ -35,6 +48,8 @@ func NewClient(config ClientConfig) *Client {
         config: config,
         down:  false,
     }
+    go client.HandleSigterm()
+
     return client
 }
 
@@ -66,92 +81,70 @@ func (c *Client) Shutdown() {
 
 // StartClientLoop Send messages to the client until some time threshold is met
 func (c *Client) StartClientLoop() {
-    sigs := make(chan os.Signal, 1)
-    signal.Notify(sigs, syscall.SIGTERM)
-
-    go func() {
-        sig := <-sigs
-        log.Infof("action: sigterm_received | result: in_progress | signal: %v", sig)
-        c.Shutdown()
-        log.Infof("action: sigterm_received | result: success | signal: %v", sig)
-    }()
-
-    // There is an autoincremental msgID to identify every message sent
-    // Messages if the message amount threshold has not been surpassed
-    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-        // If the client is down, stop the loop
-        if c.down {
-            log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-            return
-        }
-
-        // Create the connection the server in every loop iteration. Send an
-        c.createClientSocket()
-
-        bet, err := NewBetFromEnv()
-        if err != nil {
-            log.Errorf("action: build_bet_from_env | result: fail | client_id: %v | error: %v",
-                c.config.ID,
-                err,
-            )
-            return
-        }
-
-        betMessage, err := BuildBetMessage(c.config.ID, bet)
-        if err != nil {
-            log.Errorf("action: build_bet_message | result: fail | client_id: %v | error: %v",
-                c.config.ID,
-                err,
-            )
-            return
-        }
-
-        log.Infof("action: send_message | result: in_progress | client_id: %v", c.config.ID)
-        if err := c.SendMessage(betMessage); err != nil {
-            log.Errorf("action: send_message | result: fail | client_id: %v | error: %v",
-                c.config.ID,
-                err,
-            )
-            return
-        }
-
-        received_message, err := c.ReceiveExactMessage(1)
-        c.conn.Close()
-
-        if err != nil {
-            log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-                c.config.ID,
-                err,
-            )
-            return
-        }
-        
-        message_type := int(received_message[0])
-        response_status := ResponseStatus(message_type)
-
-        log.Infof("action: receive_message | result: success | client_id: %v | response_status: %v",
-            c.config.ID,
-            response_status,
-        )
-
-        // Log status
-        if response_status == OK {
-            log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"))
-        } else if response_status == ERROR {
-            log.Errorf("action: apuesta_enviada | result: fail | dni: %v | numero: %v", os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"))
-        } else {
-            log.Errorf("action: unknown_message_type | result: fail | client_id: %v", c.config.ID)
-            return
-        }
-
-        // Wait a time between sending one message and the next one
-        time.Sleep(c.config.LoopPeriod)
-
+    if err := c.createClientSocket(); err != nil {
+        return
     }
-    log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+
+    bet, err := NewBetFromEnv()
+    if err != nil {
+        log.Errorf("action: build_bet_from_env | result: fail | client_id: %v | error: %v",
+            c.config.ID,
+            err,
+        )
+        return
+    }
+
+    betMessage, err := BuildBetMessage(c.config.ID, bet)
+    if err != nil {
+        log.Errorf("action: build_bet_message | result: fail | client_id: %v | error: %v",
+            c.config.ID,
+            err,
+        )
+        return
+    }
+
+    log.Infof("action: send_message | result: in_progress | client_id: %v", c.config.ID)
+    if err := c.SendMessage(betMessage); err != nil {
+        log.Errorf("action: send_message | result: fail | client_id: %v | error: %v",
+            c.config.ID,
+            err,
+        )
+        return
+    }
+        
+    received_message, err := c.ReceiveExactMessage(1)
+    c.conn.Close()
+
+    if err != nil {
+        log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
+            c.config.ID,
+            err,
+        )
+        return
+    }
+        
+    message_type := int(received_message[0])
+    response_status := ResponseStatus(message_type)
+
+    log.Infof("action: receive_message | result: success | client_id: %v | response_status: %v",
+        c.config.ID,
+        response_status,
+    )
+
+    // Log status
+    if response_status == OK {
+        log.Infof("action: apuesta_enviada | result: success | dni: %v | numero: %v", os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"))
+    } else if response_status == ERROR {
+        log.Errorf("action: apuesta_enviada | result: fail | dni: %v | numero: %v", os.Getenv("DOCUMENTO"), os.Getenv("NUMERO"))
+    } else {
+        log.Errorf("action: unknown_message_type | result: fail | client_id: %v", c.config.ID)
+        return
+    }
+    log.Infof("action: client_finished | result: success | client_id: %v", c.config.ID)
+    time.Sleep(c.config.LoopPeriod)
 }
 
-// TO DO: DOCU
+// ReceiveExactMessage reads an exact number of bytes from the server.
 func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
     data := make([]byte, lengthToRead)
     bytesRead, err := c.conn.Read(data)

@@ -2,7 +2,6 @@ import signal
 import socket
 import logging
 
-from common.exceptions import ClientClosedConnection
 from common.response_status import ResponseStatus
 from common.utils import Bet, store_bets
 
@@ -30,8 +29,6 @@ class Server:
         finishes, servers starts to accept new connections again
         """
 
-        # TODO: Modify this program to handle signal to graceful shutdown
-        # the server
         while not self._down:
             try:
                 self.__accept_new_connection()
@@ -41,6 +38,9 @@ class Server:
                 break
 
     def __handle_sigterm(self, signum, frame):
+        """
+        Handle the SIGTERM signal to gracefully shut down the server and terminate all processes.
+        """
         logging.info('action: sigterm_received | result: in_progress')
 
         logging.info('action: close_client_socket | result: in_progress')
@@ -75,14 +75,8 @@ class Server:
             response_message = ResponseStatus.OK
             self.__send_message(response_message.value)
 
-        except ClientClosedConnection as e:
-            logging.error(f"action: client_closed_connection | result: fail | error: {e}")
         except OSError as e:
             logging.error("action: apuesta_almacenada | result: fail | error: {e}")
-            response_message = ResponseStatus.ERROR
-            self.__send_message(response_message.value)
-        except ValueError as e:
-            logging.error(f"action: parse_message | result: fail | error: {e}")
             response_message = ResponseStatus.ERROR
             self.__send_message(response_message.value)
         finally:
@@ -103,6 +97,9 @@ class Server:
         self._client_socket = c
 
     def __receive_exact_message(self, length_to_read):
+        """
+        Read an exact number of bytes from the client socket.
+        """
         message = self._client_socket.recv(length_to_read)
         while len(message) < length_to_read:
             message_read = self._client_socket.recv(length_to_read - len(message))
