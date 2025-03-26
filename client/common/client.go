@@ -163,6 +163,8 @@ func (c *Client) StartClientLoop() {
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
 
+    c.conn.Close()
+
     log.Infof("action: get_lottery_winners | result: in_progress | client_id: %v", c.config.ID)
     if err := c.GetLotteryWinners(); err != nil {
         log.Infof("action: get_lottery_winners | result: fail | client_id: %v", c.config.ID)
@@ -173,25 +175,35 @@ func (c *Client) StartClientLoop() {
 }
 
 // TO DO: DOCUMENTACION
-func (c *Client) GetLotteryWinners() error {
-    // Send winners request message
-    winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
-    if err != nil {
-        log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-        return err
-    }
-    if err := c.SendMessage(winnersRequestMessage); err != nil {
-        log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-        return err
-    }
-    log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
 
-    winners := c.ReceiveWinnersRequestResponse()
-    if winners == nil {
-        log.Infof("action: consulta_ganadores | result: fail | client_id: %v", c.config.ID)
-        return fmt.Errorf("No winners received")
+func (c *Client) GetLotteryWinners() error {
+    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
+        if err := c.createClientSocket(); err != nil {
+            return err
+        }
+        // Send winners request message
+        winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
+        if err != nil {
+            log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+        if err := c.SendMessage(winnersRequestMessage); err != nil {
+            log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+        log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
+
+        winners := c.ReceiveWinnersRequestResponse()
+        if winners != nil {
+            log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
+            break
+        }
+        
+        c.conn.Close()
+        
+        time.Sleep(c.config.LoopPeriod)
     }
-    log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
+    c.conn.Close()
     return nil
 }
 
