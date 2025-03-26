@@ -1,7 +1,7 @@
 import signal
 import socket
 import logging
-import multiprocessing
+from multiprocessing import Lock, Manager, Process
 
 from common.exceptions import InvalidMessageError
 from common.message_type import MessageType
@@ -24,8 +24,11 @@ class Server:
         self._client_socket = None
         self._down = False
         self._required_agencies = total_agencies
-        self._file_lock = multiprocessing.Lock()
-        self._barrier = multiprocessing.Barrier(total_agencies)
+
+        self._manager = Manager()
+        self._file_lock = Lock()
+        self._done_agencies_lock = Lock()
+        self._done_agencies = self._manager.dict()
         self._processes = []
 
         signal.signal(signal.SIGTERM, self.__handle_sigterm)
@@ -38,7 +41,6 @@ class Server:
         communication with a client. After client with communucation
         finishes, servers starts to accept new connections again
         """
-        
         while not self._down:
             try:
                 self.__accept_new_connection()
@@ -52,7 +54,7 @@ class Server:
                     logging.error(f"action: handle_client_connection | result: fail | error: {e}")
                     self.__close_client_connection()
                     break
-            process = multiprocessing.Process(target=self.__handle_client_connection)
+            process = Process(target=self.__handle_client_connection)
             self._processes.append(process)
             process.start()
         
@@ -146,19 +148,20 @@ class Server:
         """
         Handle an end message from the client
         """
-        logging.info(f"action: client_finished_sending_bets | result: success | agency: {agency_id}")
-                
-        response_status = ResponseStatus.OK
-        self.__send_message(response_status.value)
-
-    def __build_winners_message(self, agency_id, winners):
+        with self._done_agencies_lock:
+            self._done_agencies[agency_id] = True
+            logging.info(f"action: client_finished_sending_bets | result: success | agency: {agency_id}")
+        
+    def __build_winners_message(self, agency_id):
+        with self._file_lock:
+            winners = get_winners(self._required_agencies)
         agency_winners = winners.get(agency_id, [])
         encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in agency_winners])
         return encoded_winners
 
-    def __send_winners(self, agency_id, winners):
+    def __send_winners(self, agency_id):
         response_status = ResponseStatus.SEND_WINNERS
-        response_message = self.__build_winners_message(agency_id, winners)
+        response_message = self.__build_winners_message(agency_id)
         self.__send_message(response_status.value, response_message)
         logging.info(f"action: winners_sent | result: success | agency: {agency_id}")
 
@@ -166,16 +169,14 @@ class Server:
         """
         Handle a winners request from the client
         """
-        logging.info(f"action: waiting_for_all_bets | result: in_progress | agency: {agency_id}")
-        self._barrier.wait()
-        
-        logging.info(f"action: all_agencies_finished_sending_bets | result: success")
-        with self._file_lock:
-            winners = get_winners(self._required_agencies)
-        logging.info("action: sorteo | result: success")
-        
-        self.__send_winners(agency_id, winners)
-        return True
+        with self._done_agencies_lock:
+            if len(self._done_agencies) == self._required_agencies:
+                self.__send_winners(agency_id)
+                logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
+            else:
+                response_status = ResponseStatus.BET_NOT_FINISHED
+                self.__send_message(response_status.value)
+                logging.info(f"action: bet_not_finished_message_sent | result: success | agency: {agency_id}")
 
     def __handle_received_message(self, agency_id, message_type, message):
         """
@@ -186,9 +187,10 @@ class Server:
             return False
         elif message_type == MessageType.BATCH_END:
             self.__handle_batch_end_message(agency_id)
-            return False
+            return True
         elif message_type == MessageType.WINNERS_REQUEST:
-            return self.__handle_winners_request(agency_id)
+            self.__handle_winners_request(agency_id)
+            return True
         
         raise InvalidMessageError(f"Invalid message type: {message_type}")
 

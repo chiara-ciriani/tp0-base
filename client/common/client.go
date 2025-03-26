@@ -147,8 +147,6 @@ func (c *Client) StartClientLoop() {
                 log.Errorf("action: receive_server_confirmation | result: fail | client_id: %v", c.config.ID)
                 return
             }
-
-            time.Sleep(c.config.LoopPeriod)
         }
         if err == io.EOF {
             break
@@ -162,6 +160,8 @@ func (c *Client) StartClientLoop() {
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
 
+    c.conn.Close()
+
     log.Infof("action: get_lottery_winners | result: in_progress | client_id: %v", c.config.ID)
     if err := c.GetLotteryWinners(); err != nil {
         log.Infof("action: get_lottery_winners | result: fail | client_id: %v", c.config.ID)
@@ -172,21 +172,35 @@ func (c *Client) StartClientLoop() {
 }
 
 // TO DO: DOCUMENTACION
-func (c *Client) GetLotteryWinners() error {
-    // Send winners request message
-    winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
-    if err != nil {
-        log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-        return err
-    }
-    if err := c.SendMessage(winnersRequestMessage); err != nil {
-        log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-        return err
-    }
-    log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
 
-    winners := c.ReceiveWinnersRequestResponse()
-    log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
+func (c *Client) GetLotteryWinners() error {
+    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
+        if err := c.createClientSocket(); err != nil {
+            return err
+        }
+        // Send winners request message
+        winnersRequestMessage, err := BuildWinnersRequestMessage(c.config.ID)
+        if err != nil {
+            log.Errorf("action: build_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+        if err := c.SendMessage(winnersRequestMessage); err != nil {
+            log.Errorf("action: send_winners_request_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
+        }
+        log.Infof("action: send_winners_request_message | result: success | client_id: %v", c.config.ID)
+
+        winners := c.ReceiveWinnersRequestResponse()
+        if winners != nil {
+            log.Infof("action: consulta_ganadores | result: success | cant_ganadores: %v", len(winners))
+            break
+        }
+        
+        c.conn.Close()
+        
+        time.Sleep(c.config.LoopPeriod)
+    }
+    c.conn.Close()
     return nil
 }
 
@@ -199,6 +213,10 @@ func (c *Client) GetLotteryWinners() error {
 func (c *Client) ReceiveWinnersRequestResponse() ([]uint32) {
     responseStatus, winnersBytes, err := c.ReceiveMessage()
     if err != nil {
+        return nil
+    }
+
+    if responseStatus == BET_NOT_FINISHED {
         return nil
     }
 
