@@ -168,7 +168,6 @@ func (c *Client) StartClientLoop() {
         return
     }
     log.Infof("action: get_lottery_winners | result: success | client_id: %v", c.config.ID)
-    c.conn.Close()
 }
 
 // TO DO: DOCUMENTACION
