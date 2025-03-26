@@ -147,8 +147,6 @@ func (c *Client) StartClientLoop() {
                 log.Errorf("action: receive_server_confirmation | result: fail | client_id: %v", c.config.ID)
                 return
             }
-
-            time.Sleep(c.config.LoopPeriod)
         }
         if err == io.EOF {
             break
@@ -171,6 +169,7 @@ func (c *Client) StartClientLoop() {
     }
     log.Infof("action: get_lottery_winners | result: success | client_id: %v", c.config.ID)
     c.conn.Close()
+    time.Sleep(c.config.LoopPeriod)
 }
 
 // TO DO: DOCUMENTACION
