@@ -203,7 +203,6 @@ func (c *Client) GetLotteryWinners() error {
         
         time.Sleep(c.config.LoopPeriod)
     }
-    c.conn.Close()
     return nil
 }
 

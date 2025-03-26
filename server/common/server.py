@@ -24,7 +24,6 @@ class Server:
         self._down = False
         self._required_agencies = total_agencies
         self._done_agencies = set()
-        self._clients_sockets = {}
 
         signal.signal(signal.SIGTERM, self.__handle_sigterm)
 
@@ -49,7 +48,8 @@ class Server:
                     break
                 else:
                     logging.error(f"action: handle_client_connection | result: fail | error: {e}")
-                    self.__close_client_connection()
+                    self._client_socket.close()
+                    self._client_socket = None
                     break
 
     def __handle_sigterm(self, signum, frame):
@@ -93,6 +93,8 @@ class Server:
             logging.error(f'action: receive_message | result: fail | error: {e}')
         except EOFError:
             logging.info("action: client_disconnected | result: success")
+        finally:
+            self._client_socket.close()
 
     def __accept_new_connection(self):
         """
@@ -135,7 +137,9 @@ class Server:
         """
         self._done_agencies.add(agency_id)
         logging.info(f"action: client_finished_sending_bets | result: success | agency: {agency_id}")
-        
+
+        if len(self._done_agencies) == self._required_agencies:
+            logging.info(f"action: sorteo | result: success")
         
     def __build_winners_message(self, agency_id):
         winners = get_winners(self._required_agencies)
@@ -170,7 +174,7 @@ class Server:
             return False
         elif message_type == MessageType.BATCH_END:
             self.__handle_batch_end_message(agency_id)
-            return False
+            return True
         elif message_type == MessageType.WINNERS_REQUEST:
             self.__handle_winners_request(agency_id)
             return True
@@ -222,20 +226,3 @@ class Server:
             except OSError as e:
                 logging.error(f"action: send_message | result: fail | error: {e}")
                 break
-
-    def __send_message_to_socket(self, response_status, message, client_socket):
-        """
-        Send a message to the client
-        """
-        total_sent = 0
-        message_bytes = self.__build_message_to_client(response_status, message)
-        while total_sent < len(message_bytes):
-            try:
-                sent = client_socket.send(message_bytes[total_sent:])
-                if sent == 0:
-                    raise OSError("Socket connection broken")
-                total_sent += sent
-            except OSError as e:
-                logging.error(f"action: send_message | result: fail | error: {e}")
-                break
-
