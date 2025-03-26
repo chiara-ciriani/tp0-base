@@ -169,7 +169,6 @@ func (c *Client) StartClientLoop() {
     }
     log.Infof("action: get_lottery_winners | result: success | client_id: %v", c.config.ID)
     c.conn.Close()
-    time.Sleep(c.config.LoopPeriod)
 }
 
 // TO DO: DOCUMENTACION
@@ -201,6 +200,7 @@ func (c *Client) GetLotteryWinners() error {
         
         time.Sleep(c.config.LoopPeriod)
     }
+    time.Sleep(c.config.LoopPeriod)
     return nil
 }
 
