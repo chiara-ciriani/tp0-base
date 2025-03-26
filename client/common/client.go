@@ -96,6 +96,10 @@ func (c *Client) StartClientLoop() {
     }
     defer file.Close()
 
+    if err := c.createClientSocket(); err != nil {
+        return
+    }
+
     reader := csv.NewReader(file)
 
     for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
@@ -111,10 +115,6 @@ func (c *Client) StartClientLoop() {
         }
 
         if len(batch) > 0 {
-            if err := c.createClientSocket(); err != nil {
-                return
-            }
-
             batchMessage, err := BuildBatchMessage(c.config.ID, batch)
             if err != nil {
                 log.Errorf("action: build_batch_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
@@ -173,13 +173,11 @@ func (c *Client) StartClientLoop() {
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
     log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
+    c.conn.Close()
 }
 
 // SendEndMessage Sends the end message to the server
 func (c *Client) SendEndMessage() error {
-    if err := c.createClientSocket(); err != nil {
-        return err
-    }
     // Send end message
     endMessage, err := BuildBatchEndMessage(c.config.ID)
     if err != nil {
@@ -190,8 +188,6 @@ func (c *Client) SendEndMessage() error {
         log.Errorf("action: send_end_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
         return err
     }
-    log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
-    c.conn.Close()
     return nil
 }
 

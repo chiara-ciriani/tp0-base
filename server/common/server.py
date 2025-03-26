@@ -10,14 +10,6 @@ from common.utils import Bet, store_bets
 MSG_SIZE_LEN = 2
 AGENCY_ID_LEN = 1
 MSG_TYPE_LEN = 1
-BATCH_LEN = 1
-FIRST_NAME_LENGTH_LEN = 1
-MAX_FIRST_NAME_LENGTH = 50
-LAST_NAME_LENGTH_LEN = 1
-MAX_LAST_NAME_LENGTH = 50
-DOCUMENT_LEN = 4
-BIRTHDATE_LEN = 10
-NUMBER_LEN = 2
 
 class Server:
     def __init__(self, port, listen_backlog):
@@ -73,10 +65,12 @@ class Server:
         client socket will also be closed
         """
         try:
-            agency_id, message_type, message = self.__receive_message()
-            logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
+            finished = False
+            while not finished:
+                agency_id, message_type, message = self.__receive_message()
+                logging.info(f'action: receive_message | result: success | agency_id: {agency_id} | message_type: {message_type}')
             
-            self.__handle_received_message(agency_id, message_type, message)
+                finished = self.__handle_received_message(agency_id, message_type, message)
 
         except OSError as e:
             logging.error("action: apuesta_recibida | result: fail | error: {e}")
@@ -127,10 +121,11 @@ class Server:
         Handle a received message from the client
         """
         if message_type == MessageType.BATCH:
-            return self.__handle_batch_message(agency_id, message)
+            self.__handle_batch_message(agency_id, message)
+            return False
         elif message_type == MessageType.BATCH_END:
             logging.info(f"action: client_finished_sending_bets | result: success | agency: {agency_id}")
-            return
+            return True
         
         raise InvalidMessageError(f"Invalid message type: {message_type}")
 
