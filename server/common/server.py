@@ -40,6 +40,9 @@ class Server:
                 break
 
     def __handle_sigterm(self, signum, frame):
+        """
+        Handle the SIGTERM signal to gracefully shut down the server and terminate all processes.
+        """
         logging.info('action: sigterm_received | result: in_progress')
 
         logging.info('action: close_client_socket | result: in_progress')
@@ -96,6 +99,9 @@ class Server:
         self._client_socket = c
 
     def __obtain_bets(self, agency_id, bet_info):
+        """
+        Deserialize and return a list of bets from the received message.
+        """
         bets=[]
         total_bytes = len(bet_info)
         total_bytes_deserialized = 0
@@ -130,6 +136,9 @@ class Server:
         raise InvalidMessageError(f"Invalid message type: {message_type}")
 
     def __receive_exact_message(self, length_to_read):
+        """
+        Read an exact number of bytes from the client socket.
+        """
         message = self._client_socket.recv(length_to_read)
         
         while len(message) < length_to_read:

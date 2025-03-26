@@ -87,7 +87,8 @@ func (c *Client) createClientSocket() error {
     return nil
 }
 
-// StartClientLoop Send messages to the client until some time threshold is met
+// StartClientLoop initializes the client, reads bets from a CSV file, and sends them to the server.
+// It creates a socket connection to the server and processes bets in batches.
 func (c *Client) StartClientLoop() {
     file, err := os.Open(fmt.Sprintf("./.data/agency-%v.csv", c.config.ID))
     if err != nil {
@@ -101,79 +102,71 @@ func (c *Client) StartClientLoop() {
     }
 
     reader := csv.NewReader(file)
+    if err := c.StartPlacingBets(reader); err != nil {
+        c.conn.Close()
+        return
+    }
 
-    for msgID := 1; msgID <= c.config.LoopAmount; msgID++ {
-        if c.down {
-            log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-            return
-        }
+    c.conn.Close()
 
+    log.Infof("action: finished_sending_bets | result: success | client_id: %v", c.config.ID)
+}
+
+
+// StartPlacingBets reads batches of bets from a CSV file and sends them to the server.
+// It handles the process of building batch messages, sending them, and receiving server confirmations.
+// If an error occurs, the process stops.
+func (c *Client) StartPlacingBets(reader *csv.Reader) error {
+    for {
         batch, err := c.GetBetBatch(reader)
-        if err != nil {
-            log.Errorf("action: get_bet_batch | result: fail | client_id: %v | error: %v", c.config.ID, err)
-            return
-        }
-
         if len(batch) > 0 {
             batchMessage, err := BuildBatchMessage(c.config.ID, batch)
             if err != nil {
                 log.Errorf("action: build_batch_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-                return
+                return err
             }
 
             log.Infof("action: send_batch_message | result: in_progress | client_id: %v | batch_length: %v", c.config.ID, len(batch))
             if err := c.SendMessage(batchMessage); err != nil {
                 log.Errorf("action: send_message | result: fail | client_id: %v | error: %v", c.config.ID, err)
-                return
+                return err
             }
-            log.Infof("action: send_batch_message | result: success| client_id: %v | batch_length: %v", c.config.ID, len(batch))
+            log.Infof("action: send_batch_message | result: success | client_id: %v | batch_length: %v", c.config.ID, len(batch))
 
             received_message, err := c.ReceiveExactMessage(1)
 
-            if err != nil {
-                log.Errorf("action: receive_message| result: fail | client_id: %v | error: %v", c.config.ID, err)
-                return
-            }
-
-            if err != nil {
-                log.Errorf("action: receive_message | result: fail | client_id: %v | error: %v",
-                    c.config.ID,
-                    err,
-                )
-                return
-            }
-            
             message_type := int(received_message[0])
             response_status := ResponseStatus(message_type)
-    
-            log.Infof("action: receive_message | result: success | client_id: %v | response_status: %v",
-                c.config.ID,
-                response_status,
-            )
-    
+
+            if err != nil {
+                return err
+            }
+
             // Log status
             if response_status == OK {
                 log.Infof("action: receive_server_confirmation | result: success | client_id: %v", c.config.ID)
             } else {
                 log.Errorf("action: receive_server_confirmation | result: fail | client_id: %v", c.config.ID)
-                return
+                return fmt.Errorf("Server response not OK")
             }
-
-            time.Sleep(c.config.LoopPeriod)
         }
-        if err == io.EOF {
-            break
+        if err != nil {
+            if err == io.EOF {
+                break
+            }
+            log.Errorf("action: read_bets | result: fail | client_id: %v | error: %v", c.config.ID, err)
+            return err
         }
     }
 
     log.Infof("action: send_end_message | result: in_progress | client_id: %v", c.config.ID)
     if err := c.SendEndMessage(); err != nil {
         log.Infof("action: send_end_message | result: fail | client_id: %v", c.config.ID)
-        return
+        return err
     }
     log.Infof("action: send_end_message | result: success | client_id: %v", c.config.ID)
-    log.Infof("action: loop_finished | result: success | client_id: %v", c.config.ID)
-    c.conn.Close()
+    time.Sleep(c.config.LoopPeriod)
+    return nil
 }
 
 // SendEndMessage Sends the end message to the server
@@ -198,10 +191,6 @@ func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
     for i := 0; i < c.config.BatchMaxAmount; i++ {
         data, err := reader.Read()
         if err != nil {
-            if err.Error() == "EOF" {
-                break
-            }
-            log.Errorf("action: read_csv | result: fail | client_id: %v | error: %v", c.config.ID, err)
             return bets, err
         }
 
@@ -213,10 +202,11 @@ func (c *Client) GetBetBatch(reader *csv.Reader)([]Bet, error) {
 
         bets = append(bets, bet)
     }
+    
     return bets, nil
 }
 
-// TO DO: DOCU
+// ReceiveExactMessage reads an exact number of bytes from the server.
 func (c *Client) ReceiveExactMessage(lengthToRead int) ([]byte, error) {
     data := make([]byte, lengthToRead)
     bytesRead, err := c.conn.Read(data)
