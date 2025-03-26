@@ -53,6 +53,9 @@ class Server:
                     break
 
     def __handle_sigterm(self, signum, frame):
+        """
+        Handle the SIGTERM signal to gracefully shut down the server and terminate all processes.
+        """
         logging.info('action: sigterm_received | result: in_progress')
 
         logging.info('action: close_client_socket | result: in_progress')
@@ -111,6 +114,9 @@ class Server:
         self._client_socket = c
 
     def __obtain_bets(self, agency_id, bet_info):
+        """
+        Deserialize and return a list of bets from the received message.
+        """
         bets=[]
         total_bytes = len(bet_info)
         total_bytes_deserialized = 0
@@ -142,12 +148,18 @@ class Server:
             logging.info(f"action: sorteo | result: success")
         
     def __build_winners_message(self, agency_id):
+        """"
+        Build and encode the winners message for the specified agency.
+        """
         winners = get_winners(self._required_agencies)
         agency_winners = winners.get(agency_id, [])
         encoded_winners = b''.join([int(winner).to_bytes(DOCUMENT_LEN, 'big') for winner in agency_winners])
         return encoded_winners
 
     def __send_winners(self, agency_id):
+        """
+        Send the winners message to the specified agency.
+        """
         response_status = ResponseStatus.SEND_WINNERS
         response_message = self.__build_winners_message(agency_id)
         self.__send_message(response_status.value, response_message)
@@ -182,6 +194,9 @@ class Server:
         raise InvalidMessageError(f"Invalid message type: {message_type}")
 
     def __receive_exact_message(self, length_to_read):
+        """
+        Read an exact number of bytes from the client socket.
+        """
         message = self._client_socket.recv(length_to_read)
         while len(message) < length_to_read:
             message_read = self._client_socket.recv(length_to_read - len(message))
@@ -204,7 +219,7 @@ class Server:
     
     def __build_message_to_client(self, response_status, message=None):
         """
-        TO DO: documentar
+        Build a message to send to the client, including status and optional content.
         """
         response_status_bytes = response_status.to_bytes(MSG_TYPE_LEN, 'big')
         message_bytes = message if message else b''
