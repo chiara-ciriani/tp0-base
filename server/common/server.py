@@ -52,7 +52,8 @@ class Server:
                     break
                 else:
                     logging.error(f"action: handle_client_connection | result: fail | error: {e}")
-                    self.__close_client_connection()
+                    self._client_socket.close()
+                    self._client_socket = None
                     break
             process = Process(target=self.__handle_client_connection)
             self._processes.append(process)
@@ -171,6 +172,7 @@ class Server:
         """
         with self._done_agencies_lock:
             if len(self._done_agencies) == self._required_agencies:
+                logging.info(f"action: sorteo | result: success")
                 self.__send_winners(agency_id)
                 logging.info(f"action: client_requested_winners | result: success | agency: {agency_id}")
             else:
