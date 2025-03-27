@@ -3,6 +3,3 @@
 
 # Executables
 bin/
-
-# Agency's datasets
-.data/*.csv
